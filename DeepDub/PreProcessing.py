@@ -1,7 +1,10 @@
 import os
-from DeepDub.AV_splitter import VideoProcessor
-from DeepDub.AudioSeparator import AudioSeparator
-from DeepDub.Diar import AudioDiarization
+from AV_splitter import VideoProcessor
+from AudioSeparator import AudioSeparator
+from Diar import AudioDiarization
+
+# Import logger
+from logger import logger
 
 class Preprocessing:
     def __init__(self, input_video, output_dir=None, 
@@ -46,7 +49,7 @@ class Preprocessing:
         Returns:
             Tuple[str, str]: Paths to the extracted audio file and video without audio.
         """
-        print(f"Splitting audio and video for: {self.input_video}")
+        logger.info(f"Splitting audio and video for: {self.input_video}")
         
         # Use VideoProcessor to split audio and video
         processor = VideoProcessor(self.input_video)
@@ -67,8 +70,8 @@ class Preprocessing:
             os.rename(self.video_no_audio_path, new_video_no_audio_path)
             self.video_no_audio_path = new_video_no_audio_path
 
-        print(f"Extracted audio: {self.extracted_audio_path}")
-        print(f"Video without audio: {self.video_no_audio_path}")
+        logger.info(f"Extracted audio: {self.extracted_audio_path}")
+        logger.info(f"Video without audio: {self.video_no_audio_path}")
         return self.extracted_audio_path, self.video_no_audio_path
 
     def separate_audio(self):
@@ -79,9 +82,10 @@ class Preprocessing:
             Tuple[str, str]: Paths to the vocals and background music files.
         """
         if not self.extracted_audio_path:
+            logger.error("Audio has not been extracted. Call 'split_audio_and_video' first.")
             raise ValueError("Audio has not been extracted. Call 'split_audio_and_video' first.")
         
-        print(f"Separating audio: {self.extracted_audio_path}")
+        logger.info(f"Separating audio: {self.extracted_audio_path}")
         vocals_path, background_path = self.audio_separator.separate(self.extracted_audio_path)
 
         # Ensure paths are within base_output_dir
@@ -89,17 +93,19 @@ class Preprocessing:
         new_background_path = os.path.join(self.base_output_dir, "instrumental.mp3")
 
         if not os.path.exists(vocals_path):
+            logger.error(f"Expected vocals file not found at: {vocals_path}")
             raise FileNotFoundError(f"Expected vocals file not found at: {vocals_path}")
         os.rename(vocals_path, new_vocals_path)
         self.vocals_path = new_vocals_path
 
         if not os.path.exists(background_path):
+            logger.error(f"Expected background file not found at: {background_path}")
             raise FileNotFoundError(f"Expected background file not found at: {background_path}")
         os.rename(background_path, new_background_path)
         self.background_path = new_background_path
 
-        print(f"Vocals path: {self.vocals_path}")
-        print(f"Background path: {self.background_path}")
+        logger.info(f"Vocals path: {self.vocals_path}")
+        logger.info(f"Background path: {self.background_path}")
         return self.vocals_path, self.background_path
 
     def perform_diarization(self):
@@ -110,9 +116,10 @@ class Preprocessing:
             dict: Diarization results containing speaker segments.
         """
         if not self.vocals_path:
+            logger.error("Vocals audio has not been separated. Call 'separate_audio' first.")
             raise ValueError("Vocals audio has not been separated. Call 'separate_audio' first.")
         
-        print(f"Performing diarization on vocals: {self.vocals_path}")
+        logger.info(f"Performing diarization on vocals: {self.vocals_path}")
         diarizer = AudioDiarization(
             audio_path=self.vocals_path,
             batch_size=self.diarization_batch_size,
@@ -148,5 +155,6 @@ class Preprocessing:
             dict: Diarization data, including speaker segments.
         """
         if not self.diarization_data:
+            logger.error("Diarization has not been performed. Call 'perform_diarization' first.")
             raise ValueError("Diarization has not been performed. Call 'perform_diarization' first.")
         return self.diarization_data
