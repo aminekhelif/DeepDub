@@ -15,18 +15,22 @@ logger = logging.getLogger(__name__)
 
 class AudioSeparator:
     """
-    A simple class to handle audio separation using fixed models.
+    A class to handle audio separation using specified models with flexible input and output handling.
     """
 
-    def __init__(self, model: str = "BS-RoFormer"):
+    def __init__(self, model: str = "BS-RoFormer", output_dir: str = None, output_format: str = "mp3"):
         """
-        Initializes the AudioSeparator with a specified model.
+        Initializes the AudioSeparator with a specified model, output directory, and output format.
 
         Args:
             model (str): The model to use for separation. Defaults to "BS-RoFormer".
+            output_dir (str): Directory to save output files. Defaults to tempfile.gettempdir().
+            output_format (str): Format for output files. Defaults to "mp3".
         """
-        self.output_dir = tempfile.gettempdir()
+        self.output_dir = output_dir if output_dir else tempfile.gettempdir()
+        os.makedirs(self.output_dir, exist_ok=True)
         self.sample_rate = 44100
+        self.output_format = output_format  # Ensure this line is present
 
         # Predefined model file paths
         self.model_paths = {
@@ -60,7 +64,7 @@ class AudioSeparator:
     def _load_model(self, model_name: str):
         """Loads the specified model."""
         model_path = self.model_paths[model_name]
-        separator = Separator(output_dir=self.output_dir, output_format="mp3")
+        separator = Separator(output_dir=self.output_dir, output_format=self.output_format)
         for attempt in range(1, 4):
             try:
                 logger.info(f"Loading model '{model_name}' from '{model_path}' (Attempt {attempt}/3)")
@@ -99,7 +103,7 @@ class AudioSeparator:
         audio_data = [sf.read(file)[0] for file in output_files]
         merged_audio = np.sum(np.array(audio_data), axis=0)
         merged_file = os.path.join(
-            self.output_dir, f"{os.path.basename(output_files[0]).split('.')[0]}_merged.mp3"
+            self.output_dir, f"{os.path.basename(output_files[0]).split('.')[0]}_merged.{self.output_format}"
         )
         sf.write(merged_file, merged_audio, self.sample_rate)
         return merged_file
