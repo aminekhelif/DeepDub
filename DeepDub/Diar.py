@@ -7,7 +7,7 @@ from tqdm import tqdm
 import sys
 sys.path.append("../")
 from whisperX import whisperx
-from logger import logger
+from DeepDub.logger import logger
 
 class AudioDiarization:
     def __init__(self, audio_path, diarization_dir=None, speaker_audio_dir=None,

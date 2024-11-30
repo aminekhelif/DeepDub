@@ -1,6 +1,5 @@
 import os
 import tempfile
-import logging
 from typing import Tuple, List
 import numpy as np
 import soundfile as sf
@@ -8,7 +7,7 @@ import librosa
 import matplotlib.pyplot as plt
 import matplotlib
 from audio_separator.separator import Separator 
-from logger import logger
+from DeepDub.logger import logger
 
 class AudioSeparator:
     """
@@ -128,3 +127,8 @@ class AudioSeparator:
         fig.tight_layout()
 
         return fig
+
+    def save_spectrogram(self, audio_path: str, output_path: str):
+        fig = self.plot_spectrogram(audio_path)
+        fig.savefig(output_path)
+        plt.close(fig)

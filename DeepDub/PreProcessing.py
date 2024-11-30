@@ -1,10 +1,10 @@
 import os
-from AV_splitter import VideoProcessor
-from AudioSeparator import AudioSeparator
-from Diar import AudioDiarization
+from DeepDub.AV_splitter import VideoProcessor
+from DeepDub.AudioSeparator import AudioSeparator
+from DeepDub.Diar import AudioDiarization
 
 # Import logger
-from logger import logger
+from DeepDub.logger import logger
 
 class Preprocessing:
     def __init__(self, input_video, output_dir=None, 

@@ -1,6 +1,6 @@
 import os
 from moviepy.editor import VideoFileClip
-from logger import logger
+from DeepDub.logger import logger
 
 class VideoProcessor:
     def __init__(self, input_video, output_audio=None, output_video_no_audio=None):
