@@ -7,6 +7,7 @@ from tqdm import tqdm
 import sys
 sys.path.append("../")
 from whisperX import whisperx
+from logger import logger
 
 class AudioDiarization:
     def __init__(self, audio_path, diarization_dir=None, speaker_audio_dir=None,
@@ -33,26 +34,26 @@ class AudioDiarization:
             json.dump(data, f, indent=4)
     
     def perform_diarization(self):
-        print("Loading Whisper model...")
+        logger.info("Loading Whisper model...")
         model = whisperx.load_model(self.model_size, device=self.device, compute_type=self.compute_type)
 
-        print(f"Loading audio file: {self.audio_path}")
+        logger.info(f"Loading audio file: {self.audio_path}")
         audio = whisperx.load_audio(self.audio_path)
 
-        print("Transcribing audio...")
+        logger.info("Transcribing audio...")
         result = model.transcribe(audio, batch_size=self.batch_size)
 
-        print("Loading alignment model...")
+        logger.info("Loading alignment model...")
         align_model, metadata = whisperx.load_align_model(result["language"], device=self.device)
 
-        print("Aligning transcription...")
+        logger.info("Aligning transcription...")
         result = whisperx.align(result["segments"], align_model, metadata, audio, self.device)
 
-        print("Performing speaker diarization...")
+        logger.info("Performing speaker diarization...")
         diarize_model = whisperx.DiarizationPipeline(use_auth_token=self.HF_token, device=self.device)
         diar_segments = diarize_model(audio)
 
-        print("Assigning speaker labels...")
+        logger.info("Assigning speaker labels...")
         result = whisperx.assign_word_speakers(diar_segments, result)
 
         # Save the full diarization result
@@ -66,35 +67,36 @@ class AudioDiarization:
         simplified_json_path = os.path.join(self.diarization_dir, "diar_simple.json")
         self.save_json(simplified_segments, simplified_json_path)
 
-        print("Diarization complete.")
+        logger.info("Diarization complete.")
         return result
 
     def extract_speaker_audio(self):
         diar_simple_path = os.path.join(self.diarization_dir, "diar_simple.json")
         if not os.path.exists(diar_simple_path):
+            logger.error(f"Diarization file not found: {diar_simple_path}")
             raise FileNotFoundError(f"Diarization file not found: {diar_simple_path}")
 
         with open(diar_simple_path, "r") as f:
             speaker_segments = json.load(f)
 
-        print(f"Loading audio: {self.audio_path}")
+        logger.info(f"Loading audio: {self.audio_path}")
         waveform, sample_rate = torchaudio.load(self.audio_path)
         total_audio_duration = waveform.shape[1] / sample_rate
 
         for idx, segment in enumerate(tqdm(speaker_segments, desc="Processing segments")):
             if any(key not in segment for key in ["start", "end", "text"]):
-                print(f"Skipping segment {idx}: Missing required keys.")
+                logger.warning(f"Skipping segment {idx}: Missing required keys.")
                 continue
 
             start, end, speaker = segment["start"], segment["end"], segment.get("speaker", "Unknown")
             if start >= end or start < 0 or end > total_audio_duration:
-                print(f"Skipping segment {idx}: Invalid time range.")
+                logger.warning(f"Skipping segment {idx}: Invalid time range.")
                 continue
 
             start_frame, end_frame = int(start * sample_rate), int(end * sample_rate)
             segment_audio = waveform[:, start_frame:end_frame]
             if segment_audio.numel() == 0:
-                print(f"Skipping segment {idx}: Empty audio.")
+                logger.warning(f"Skipping segment {idx}: Empty audio.")
                 continue
 
             speaker_dir = os.path.join(self.speaker_audio_dir, speaker)
@@ -107,16 +109,17 @@ class AudioDiarization:
             sf.write(audio_path, segment_audio.numpy().T, sample_rate)
             metadata = {**segment, "audio_file": os.path.relpath(audio_path, self.speaker_audio_dir)}
             self.save_json(metadata, os.path.join(segment_dir, "metadata.json"))
-
+    
     def get_speakers(self):
         if not os.path.exists(self.speaker_audio_dir):
+            logger.error(f"Speaker audio folder not found: {self.speaker_audio_dir}")
             raise FileNotFoundError(f"Speaker audio folder not found: {self.speaker_audio_dir}")
 
         speakers = [
             item for item in os.listdir(self.speaker_audio_dir)
             if os.path.isdir(os.path.join(self.speaker_audio_dir, item))
         ]
-        print(f"Found speakers: {speakers}")
+        logger.info(f"Found speakers: {speakers}")
         return speakers
 
     def concatenate_speaker_segments(self):
@@ -127,7 +130,7 @@ class AudioDiarization:
                 if os.path.isdir(os.path.join(speaker_dir, d))
             ]
             if not segment_dirs:
-                print(f"No segments found for speaker {speaker}.")
+                logger.warning(f"No segments found for speaker {speaker}.")
                 continue
 
             segments = []
@@ -135,14 +138,14 @@ class AudioDiarization:
             for segment_dir in segment_dirs:
                 metadata_file = os.path.join(segment_dir, "metadata.json")
                 if not os.path.exists(metadata_file):
-                    print(f"Skipping segment in {segment_dir}: Metadata not found.")
+                    logger.warning(f"Skipping segment in {segment_dir}: Metadata not found.")
                     continue
                 with open(metadata_file, "r") as f:
                     metadata = json.load(f)
 
                 audio_file = os.path.join(self.speaker_audio_dir, metadata["audio_file"])
                 if not os.path.exists(audio_file):
-                    print(f"Skipping segment in {segment_dir}: Audio file not found.")
+                    logger.warning(f"Skipping segment in {segment_dir}: Audio file not found.")
                     continue
 
                 data, samplerate = sf.read(audio_file)
@@ -150,7 +153,7 @@ class AudioDiarization:
                 segments.append({"data": data, "metadata": metadata})
 
             if len(sample_rates) > 1:
-                print(f"Sample rate mismatch for speaker {speaker}.")
+                logger.warning(f"Sample rate mismatch for speaker {speaker}.")
                 continue
 
             sample_rate = sample_rates.pop()
@@ -160,4 +163,4 @@ class AudioDiarization:
 
             sf.write(os.path.join(speaker_dir, f"{speaker}_concatenated.wav"), concatenated_audio, sample_rate)
             self.save_json(concatenated_metadata, os.path.join(speaker_dir, f"{speaker}_concatenated_metadata.json"))
-            print(f"Speaker {speaker} concatenated.")
+            logger.info(f"Speaker {speaker} concatenated.")
