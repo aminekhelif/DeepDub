@@ -8,10 +8,7 @@ import librosa
 import matplotlib.pyplot as plt
 import matplotlib
 from audio_separator.separator import Separator 
-
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+from logger import logger
 
 class AudioSeparator:
     """
@@ -30,7 +27,7 @@ class AudioSeparator:
         self.output_dir = output_dir if output_dir else tempfile.gettempdir()
         os.makedirs(self.output_dir, exist_ok=True)
         self.sample_rate = 44100
-        self.output_format = output_format  # Ensure this line is present
+        self.output_format = output_format 
 
         # Predefined model file paths
         self.model_paths = {
@@ -56,6 +53,7 @@ class AudioSeparator:
     def model(self, model_name: str):
         """Sets the current model and loads it if not already loaded."""
         if model_name not in self.available_models:
+            logger.error(f"Model '{model_name}' is not supported.")
             raise ValueError(f"Model '{model_name}' is not supported.")
         self._model = model_name
         if model_name not in self.separators:
@@ -94,6 +92,7 @@ class AudioSeparator:
         if self.model in ["BS-RoFormer", "Mel-RoFormer"]:
             vocals, bgm = separated_paths[1], separated_paths[0]
         else:
+            logger.error(f"Unexpected output format for model '{self.model}'.")
             raise ValueError(f"Unexpected output format for model '{self.model}'.")
 
         return vocals, bgm
