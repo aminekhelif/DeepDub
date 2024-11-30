@@ -1,5 +1,6 @@
 import os
 from moviepy.editor import VideoFileClip
+from logger import logger
 
 class VideoProcessor:
     def __init__(self, input_video, output_audio=None, output_video_no_audio=None):
@@ -35,18 +36,24 @@ class VideoProcessor:
         Returns:
         tuple: A tuple containing the paths to the extracted audio file and the video without audio.
         """
+        logger.info(f"Processing video: {self.input_video}")
         # Load the video
-        video = VideoFileClip(self.input_video)
-        
+        try:
+            video = VideoFileClip(self.input_video)
+        except Exception as e:
+            logger.error(f"Error loading video: {e}")
+            raise
         try:
             # Extract and save the audio
             if video.audio:
+                logger.info(f"Extracting audio to: {self.output_audio}")
                 video.audio.write_audiofile(self.output_audio)
             else:
-                print("No audio track found in the input video.")
+                logger.warning("No audio track found in the input video.")
                 self.output_audio = None
             
             # Create and save the video without audio
+            logger.info(f"Creating video without audio: {self.output_video_no_audio}")
             video_without_audio = video.without_audio()
             video_without_audio.write_videofile(self.output_video_no_audio, codec='libx264', audio=False)
         finally:
@@ -54,4 +61,5 @@ class VideoProcessor:
             video.close()
             video_without_audio.close()
         
+        logger.info(f"Audio and video split completed.")
         return self.output_audio, self.output_video_no_audio
