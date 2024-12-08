@@ -41,6 +41,8 @@ class Preprocessing:
         self.vocals_path = None
         self.background_path = None
         self.diarization_data = None
+        self.speaker_audio_dir = None
+        self.concatenated_audio_dir = None
 
     def split_audio_and_video(self):
         """
@@ -121,16 +123,25 @@ class Preprocessing:
         
         logger.info(f"Performing diarization on vocals: {self.vocals_path}")
         diarizer = AudioDiarization(
-            audio_path=self.vocals_path,
-            batch_size=self.diarization_batch_size,
-            device=self.device,
-            compute_type=self.compute_type,
-            HF_token=self.HF_token
-        )
+                audio_path=self.vocals_path,
+                diarization_dir=os.path.join(self.base_output_dir, "diarization"),
+                # speaker_audio_dir=os.path.join(self.base_output_dir, "speaker_audio"),
+                batch_size=self.diarization_batch_size,
+                device=self.device,
+                compute_type=self.compute_type,
+                HF_token=self.HF_token
+            )
+
         self.diarization_data = diarizer.perform_diarization()
-        diarizer.extract_speaker_audio()
-        diarizer.concatenate_speaker_segments()
-        return self.diarization_data
+        self.speaker_audio_dir = diarizer.extract_speaker_audio()
+        self.concatenated_audio_dir = diarizer.concatenate_speaker_segments()
+
+        logger.info(f"Diarization results: {self.diarization_data}")
+        return {
+            "diarization_data": self.diarization_data,
+            "speaker_audio_dir": self.speaker_audio_dir,
+            "concatenated_audio_dir": self.concatenated_audio_dir
+        }
 
     def get_paths(self):
         """
