@@ -10,7 +10,7 @@ from whisperX import whisperx
 from DeepDub.logger import logger
 
 class AudioDiarization:
-    def __init__(self, audio_path, diarization_dir=None, speaker_audio_dir=None,
+    def __init__(self, audio_path, diarization_dir=None,# speaker_audio_dir=None,
                  batch_size=16, device="cpu", compute_type="int8", HF_token=None, model_size="large-v3"):
         self.audio_path = os.path.abspath(audio_path)
         self.input_folder = os.path.dirname(self.audio_path)
@@ -22,7 +22,7 @@ class AudioDiarization:
         
         # Set output directories
         self.diarization_dir = diarization_dir if diarization_dir else os.path.join(self.input_folder, "diarization")
-        self.speaker_audio_dir = speaker_audio_dir if speaker_audio_dir else os.path.join(self.input_folder, "speaker_audio")
+        self.speaker_audio_dir = os.path.join(self.diarization_dir, "speaker_audio")  # Adjusted to always use diarization_dir
         
         # Ensure directories exist
         os.makedirs(self.diarization_dir, exist_ok=True)
@@ -68,7 +68,7 @@ class AudioDiarization:
         self.save_json(simplified_segments, simplified_json_path)
 
         logger.info("Diarization complete.")
-        return result
+        return simplified_json_path
 
     def extract_speaker_audio(self):
         diar_simple_path = os.path.join(self.diarization_dir, "diar_simple.json")
@@ -109,6 +109,7 @@ class AudioDiarization:
             sf.write(audio_path, segment_audio.numpy().T, sample_rate)
             metadata = {**segment, "audio_file": os.path.relpath(audio_path, self.speaker_audio_dir)}
             self.save_json(metadata, os.path.join(segment_dir, "metadata.json"))
+        return self.speaker_audio_dir
     
     def get_speakers(self):
         if not os.path.exists(self.speaker_audio_dir):
@@ -164,3 +165,4 @@ class AudioDiarization:
             sf.write(os.path.join(speaker_dir, f"{speaker}_concatenated.wav"), concatenated_audio, sample_rate)
             self.save_json(concatenated_metadata, os.path.join(speaker_dir, f"{speaker}_concatenated_metadata.json"))
             logger.info(f"Speaker {speaker} concatenated.")
+        return self.speaker_audio_dir
