@@ -128,7 +128,17 @@ class AudioSeparator:
 
         return fig
 
-    def save_spectrogram(self, audio_path: str, output_path: str):
+    def save_spectrogram(self, audio_path: str, output_path: str = None):
+        """
+        Saves the spectrogram of an audio file.
+
+        Args:
+            audio_path (str): Path to the audio file.
+            output_path (str, optional): Path to save the spectrogram. Defaults to `output_dir`.
+        """
+        if output_path is None:
+            base_name = os.path.splitext(os.path.basename(audio_path))[0]
+            output_path = os.path.join(self.output_dir, f"{base_name}_spectrogram.png")
         fig = self.plot_spectrogram(audio_path)
         fig.savefig(output_path)
         plt.close(fig)
