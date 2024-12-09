@@ -7,7 +7,7 @@ from DeepDub.Diar import AudioDiarization
 from DeepDub.logger import logger
 
 class Preprocessing:
-    def __init__(self, input_video, output_dir=None, 
+    def __init__(self, input_video=None, output_dir=None, 
                  audio_separator_model="Mel-RoFormer", 
                  diarization_batch_size=16, device="cpu", compute_type="int8", HF_token=None):
         """
@@ -22,11 +22,12 @@ class Preprocessing:
             compute_type (str): Precision type for WhisperX model.
             HF_token (str): Hugging Face token for diarization pipeline.
         """
-        self.input_video = os.path.abspath(input_video)
+        self.input_video = os.path.abspath(input_video) if input_video else None
         if output_dir:
             self.base_output_dir = os.path.abspath(output_dir)
         else:
-            self.base_output_dir = os.path.join(os.path.dirname(self.input_video), "separation_output")
+            base_dir = os.path.dirname(self.input_video) if self.input_video else "."
+            self.base_output_dir = os.path.join(base_dir, "separation_output")
         os.makedirs(self.base_output_dir, exist_ok=True)
 
         self.audio_separator = AudioSeparator(model=audio_separator_model, output_dir=self.base_output_dir)
@@ -51,27 +52,24 @@ class Preprocessing:
         Returns:
             Tuple[str, str]: Paths to the extracted audio file and video without audio.
         """
+        if not self.input_video or not os.path.exists(self.input_video):
+            logger.error("No valid input video provided.")
+            raise ValueError("No valid input video provided.")
         logger.info(f"Splitting audio and video for: {self.input_video}")
         
         # Use VideoProcessor to split audio and video
         processor = VideoProcessor(self.input_video)
         self.extracted_audio_path, self.video_no_audio_path = processor.split_audio_video()
-        
-        # Move files to base_output_dir if necessary
-        extracted_audio_base = os.path.basename(self.extracted_audio_path)
-        video_no_audio_base = os.path.basename(self.video_no_audio_path)
-        
-        new_extracted_audio_path = os.path.join(self.base_output_dir, extracted_audio_base)
-        new_video_no_audio_path = os.path.join(self.base_output_dir, video_no_audio_base)
-        
-        if self.extracted_audio_path != new_extracted_audio_path:
-            os.rename(self.extracted_audio_path, new_extracted_audio_path)
-            self.extracted_audio_path = new_extracted_audio_path
-        
-        if self.video_no_audio_path != new_video_no_audio_path:
-            os.rename(self.video_no_audio_path, new_video_no_audio_path)
-            self.video_no_audio_path = new_video_no_audio_path
-
+        if self.extracted_audio_path:
+            new_extracted = os.path.join(self.base_output_dir, os.path.basename(self.extracted_audio_path))
+            if self.extracted_audio_path != new_extracted:
+                os.rename(self.extracted_audio_path, new_extracted)
+                self.extracted_audio_path = new_extracted
+        if self.video_no_audio_path:
+            new_video_no_audio = os.path.join(self.base_output_dir, os.path.basename(self.video_no_audio_path))
+            if self.video_no_audio_path != new_video_no_audio:
+                os.rename(self.video_no_audio_path, new_video_no_audio)
+                self.video_no_audio_path = new_video_no_audio
         logger.info(f"Extracted audio: {self.extracted_audio_path}")
         logger.info(f"Video without audio: {self.video_no_audio_path}")
         return self.extracted_audio_path, self.video_no_audio_path
@@ -83,10 +81,9 @@ class Preprocessing:
         Returns:
             Tuple[str, str]: Paths to the vocals and background music files.
         """
-        if not self.extracted_audio_path:
-            logger.error("Audio has not been extracted. Call 'split_audio_and_video' first.")
-            raise ValueError("Audio has not been extracted. Call 'split_audio_and_video' first.")
-        
+        if not self.extracted_audio_path or not os.path.exists(self.extracted_audio_path):
+            logger.error("No valid audio provided for separation.")
+            raise ValueError("Set 'extracted_audio_path' to a valid audio file before calling separate_audio.")
         logger.info(f"Separating audio: {self.extracted_audio_path}")
         vocals_path, background_path = self.audio_separator.separate(self.extracted_audio_path)
 
@@ -117,20 +114,18 @@ class Preprocessing:
         Returns:
             dict: Diarization results containing speaker segments.
         """
-        if not self.vocals_path:
-            logger.error("Vocals audio has not been separated. Call 'separate_audio' first.")
-            raise ValueError("Vocals audio has not been separated. Call 'separate_audio' first.")
-        
+        if not self.vocals_path or not os.path.exists(self.vocals_path):
+            logger.error("No valid vocals audio provided.")
+            raise ValueError("Set 'vocals_path' to a valid audio file before calling perform_diarization.")
         logger.info(f"Performing diarization on vocals: {self.vocals_path}")
         diarizer = AudioDiarization(
-                audio_path=self.vocals_path,
-                diarization_dir=os.path.join(self.base_output_dir, "diarization"),
-                # speaker_audio_dir=os.path.join(self.base_output_dir, "speaker_audio"),
-                batch_size=self.diarization_batch_size,
-                device=self.device,
-                compute_type=self.compute_type,
-                HF_token=self.HF_token
-            )
+            audio_path=self.vocals_path,
+            diarization_dir=os.path.join(self.base_output_dir, "diarization"),
+            batch_size=self.diarization_batch_size,
+            device=self.device,
+            compute_type=self.compute_type,
+            HF_token=self.HF_token
+        )
 
         self.diarization_data = diarizer.perform_diarization()
         self.speaker_audio_dir = diarizer.extract_speaker_audio()
@@ -165,7 +160,7 @@ class Preprocessing:
         Returns:
             dict: Diarization data, including speaker segments.
         """
-        if not self.diarization_data:
-            logger.error("Diarization has not been performed. Call 'perform_diarization' first.")
-            raise ValueError("Diarization has not been performed. Call 'perform_diarization' first.")
+        if not self.diarization_data or not os.path.exists(self.diarization_data):
+            logger.error("Diarization not performed or no data found.")
+            raise ValueError("Diarization not performed or no data found.")
         return self.diarization_data
