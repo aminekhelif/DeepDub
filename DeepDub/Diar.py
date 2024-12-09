@@ -10,8 +10,9 @@ from whisperX import whisperx
 from DeepDub.logger import logger
 
 class AudioDiarization:
-    def __init__(self, audio_path, diarization_dir=None,# speaker_audio_dir=None,
-                 batch_size=16, device="cpu", compute_type="int8", HF_token=None, model_size="large-v3"):
+    def __init__(self, audio_path, diarization_dir=None, batch_size=16, device="cpu", compute_type="int8", HF_token=None, model_size="large-v3"):
+        if not audio_path or not os.path.exists(audio_path):
+            raise ValueError(f"Invalid audio_path for diarization: {audio_path}")
         self.audio_path = os.path.abspath(audio_path)
         self.input_folder = os.path.dirname(self.audio_path)
         self.batch_size = batch_size
@@ -150,16 +151,22 @@ class AudioDiarization:
                     continue
 
                 data, samplerate = sf.read(audio_file)
+                # Convert to mono
+                if data.ndim == 1:
+                    data = data.reshape(-1, 1)
+                elif data.ndim == 2:
+                    data = data[:, :1]
                 sample_rates.add(samplerate)
                 segments.append({"data": data, "metadata": metadata})
 
             if len(sample_rates) > 1:
                 logger.warning(f"Sample rate mismatch for speaker {speaker}.")
                 continue
-
+            if not segments:
+                continue
             sample_rate = sample_rates.pop()
             sorted_segments = sorted(segments, key=lambda x: x["metadata"]["start"])
-            concatenated_audio = np.concatenate([s["data"] for s in sorted_segments])
+            concatenated_audio = np.concatenate([s["data"] for s in sorted_segments], axis=0)
             concatenated_metadata = {"speaker": speaker, "segments": [s["metadata"] for s in sorted_segments]}
 
             sf.write(os.path.join(speaker_dir, f"{speaker}_concatenated.wav"), concatenated_audio, sample_rate)
