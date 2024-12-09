@@ -12,6 +12,8 @@ class VideoProcessor:
         processing_dir (str, optional): Central directory for saving outputs.
         """
         # Absolute path of the input video
+        if not input_video or not os.path.exists(input_video):
+            raise ValueError(f"Input video not found: {input_video}")
         self.input_video = os.path.abspath(input_video)
         
         # Set processing directory, defaulting to the input video's directory
