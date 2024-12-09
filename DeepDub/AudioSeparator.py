@@ -84,6 +84,10 @@ class AudioSeparator:
         Returns:
             Tuple[str, str]: Paths to the vocals and background music files.
         """
+        if self.model not in self.separators:
+            raise RuntimeError(f"No separator loaded for model {self.model}.")
+        if not audio_path or not os.path.exists(audio_path):
+            raise ValueError("No valid audio_path provided for separation.")
         separator = self.separators[self.model]
         separated_files = separator.separate(audio_path)
         separated_paths = [os.path.join(self.output_dir, out) for out in separated_files]
