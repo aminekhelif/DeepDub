@@ -209,15 +209,15 @@ with gr.Blocks() as demo:
     split_button = gr.Button("Split Audio & Video")
     with gr.Row():
         video_without_audio = gr.Video(label="Video Without Audio", height=300)
-        extracted_audio = gr.Audio(label="Extracted Audio")
+        extracted_audio = gr.Audio(label="Extracted Audio", type="filepath", show_download_button=True, interactive=True)
 
     split_button.click(split_audio_video, inputs=video_input, outputs=[video_without_audio, extracted_audio])
 
     gr.Markdown("### Step 2: Separate Audio")
     separate_button = gr.Button("Separate Audio")
     with gr.Row():
-        vocals_audio = gr.Audio(label="Vocals")
-        background_audio = gr.Audio(label="Background Music")
+        vocals_audio = gr.Audio(label="Vocals", type="filepath", show_download_button=True, interactive=True)
+        background_audio = gr.Audio(label="Background Music", type="filepath", show_download_button=True, interactive=True)
     with gr.Row():
         vocals_spectrogram = gr.Image(label="Vocals Spectrogram")
         background_spectrogram = gr.Image(label="Background Spectrogram")
@@ -235,7 +235,7 @@ with gr.Blocks() as demo:
     # Place metadata and audio side by side
     with gr.Row():
         metadata_display = gr.Textbox(label="Metadata JSON", lines=15, interactive=False)
-        file_audio = gr.Audio(label="Audio Player")
+        file_audio = gr.Audio(label="Audio Player", type="filepath", show_download_button=True, interactive=True)
 
     diarize_button.click(perform_diarization, inputs=vocals_audio, outputs=[diar_json_display, speakers_dropdown])
     speakers_dropdown.change(update_speaker_files, inputs=speakers_dropdown, outputs=speaker_file_dropdown)
