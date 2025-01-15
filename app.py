@@ -8,7 +8,7 @@ import soundfile as sf
 from DeepDub.logger import logger
 
 # Load configuration
-with open('config.yaml', 'r') as file:
+with open('./DeepDub/config.yaml', 'r') as file:
     config = yaml.safe_load(file)
 
 # Define accessible temporary directory for outputs
