@@ -1,7 +1,7 @@
 # logger.py
 import yaml
 import logging
-
+import os 
 def setup_logger(config_path):
     with open(config_path, 'r') as file:
         config = yaml.safe_load(file)
@@ -15,4 +15,6 @@ def setup_logger(config_path):
     logger = logging.getLogger(__name__)
     return logger
 
-logger = setup_logger('config.yaml')
+# actual loggeer path 
+config_path = os.path.join(os.path.dirname(__file__), 'config.yaml')
+logger = setup_logger(config_path)
