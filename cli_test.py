@@ -191,42 +191,41 @@ def main():
     else:
         user_extensions = None
 
-    # Check if input_path is a file or directory
+    # ------------------------------------------------------
+    #  Pre-snapshot Implementation: Gather all files first,
+    #  then process them to avoid infinite recursion.
+    # ------------------------------------------------------
+    files_to_process = []
+
+    # If input_path is a single file, just add it
     if os.path.isfile(args.input_path):
-        # Process the single file
+        files_to_process.append(args.input_path)
+    else:
+        # Otherwise, recursively collect matching files
+        for root, dirs, files in os.walk(args.input_path):
+            for file_name in files:
+                if user_extensions:
+                    # If user gave custom extensions
+                    if is_valid_extension(file_name, user_extensions):
+                        full_path = os.path.join(root, file_name)
+                        files_to_process.append(full_path)
+                else:
+                    # Fallback to default A/V extensions
+                    valid_exts = (".mp3", ".wav", ".mp4", ".mkv", ".mov")
+                    if is_valid_extension(file_name, valid_exts):
+                        full_path = os.path.join(root, file_name)
+                        files_to_process.append(full_path)
+
+    # Now we process all pre-collected files
+    for file_path in files_to_process:
         process_single_file(
-            input_file=args.input_path,
+            input_file=file_path,
             audio_separator_model=audio_separator_model,
             diarization_batch_size=diarization_batch_size,
             device=device,
             compute_type=compute_type,
             HF_token=HF_token
         )
-    else:
-        # input_path is a directory, so we walk through it
-        for root, dirs, files in os.walk(args.input_path):
-            if 'output_directory' in root:
-                continue
-            for file_name in files:
-                # If user specified multiple extensions, skip files that don't match
-                if user_extensions:
-                    if not is_valid_extension(file_name, user_extensions):
-                        continue
-                else:
-                    # If no user extensions, fallback to a default set
-                    valid_exts = (".mp3", ".wav", ".mp4", ".mkv", ".mov")
-                    if not is_valid_extension(file_name, valid_exts):
-                        continue
-
-                full_path = os.path.join(root, file_name)
-                process_single_file(
-                    input_file=full_path,
-                    audio_separator_model=audio_separator_model,
-                    diarization_batch_size=diarization_batch_size,
-                    device=device,
-                    compute_type=compute_type,
-                    HF_token=HF_token
-                )
 
 if __name__ == "__main__":
     main()
