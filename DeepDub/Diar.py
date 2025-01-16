@@ -10,7 +10,7 @@ from whisperX import whisperx
 from DeepDub.logger import logger
 
 class AudioDiarization:
-    def __init__(self, audio_path, diarization_dir=None, batch_size=16, device="cpu", compute_type="int8", HF_token=None, model_size="large-v3"):
+    def __init__(self, audio_path, diarization_dir=None, batch_size=16, device="cpu", compute_type="int8", HF_token=None, model_size="large-v3",num_speakers=None,language=None):
         if not audio_path or not os.path.exists(audio_path):
             raise ValueError(f"Invalid audio_path for diarization: {audio_path}")
         self.audio_path = os.path.abspath(audio_path)
@@ -20,6 +20,8 @@ class AudioDiarization:
         self.compute_type = compute_type
         self.HF_token = HF_token
         self.model_size = model_size
+        self.num_speakers = num_speakers
+        self.language = language
         
         # Set output directories
         self.diarization_dir = diarization_dir if diarization_dir else os.path.join(self.input_folder, "diarization")
@@ -42,7 +44,7 @@ class AudioDiarization:
         audio = whisperx.load_audio(self.audio_path)
 
         logger.info("Transcribing audio...")
-        result = model.transcribe(audio, batch_size=self.batch_size)
+        result = model.transcribe(audio, batch_size=self.batch_size,language=self.language)
 
         logger.info("Loading alignment model...")
         align_model, metadata = whisperx.load_align_model(result["language"], device=self.device)
@@ -52,7 +54,7 @@ class AudioDiarization:
 
         logger.info("Performing speaker diarization...")
         diarize_model = whisperx.DiarizationPipeline(use_auth_token=self.HF_token, device=self.device)
-        diar_segments = diarize_model(audio)
+        diar_segments = diarize_model(audio,num_speakers=self.num_speakers)
 
         logger.info("Assigning speaker labels...")
         result = whisperx.assign_word_speakers(diar_segments, result)
