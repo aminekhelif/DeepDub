@@ -21,3 +21,5 @@ torch==2.5.0
 torchaudio==2.5.0
 tqdm==4.66.5
 transformers==4.47.1
+# WhisperX from Git (in editable mode):
+-e git+https://github.com/m-bain/whisperX.git#egg=whisperx
