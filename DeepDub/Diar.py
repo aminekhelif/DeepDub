@@ -10,7 +10,7 @@ from whisperX import whisperx
 from DeepDub.logger import logger
 
 class AudioDiarization:
-    def __init__(self, audio_path, diarization_dir=None, batch_size=16, device="cpu", compute_type="int8", HF_token=None, model_size="large-v3",num_speakers=None,language=None):
+    def __init__(self, audio_path, diarization_dir=None, batch_size=16, device="cpu", compute_type="int8", HF_token=None, model_size="large-v3",num_speakers=None,language=None,device_index=0):
         if not audio_path or not os.path.exists(audio_path):
             raise ValueError(f"Invalid audio_path for diarization: {audio_path}")
         self.audio_path = os.path.abspath(audio_path)
@@ -22,6 +22,7 @@ class AudioDiarization:
         self.model_size = model_size
         self.num_speakers = num_speakers
         self.language = language
+        self.device_index = device_index
         
         # Set output directories
         self.diarization_dir = diarization_dir if diarization_dir else os.path.join(self.input_folder, "diarization")
@@ -38,7 +39,7 @@ class AudioDiarization:
     
     def perform_diarization(self):
         logger.info("Loading Whisper model...")
-        model = whisperx.load_model(self.model_size, device=self.device, compute_type=self.compute_type)
+        model = whisperx.load_model(self.model_size, device=self.device, device_index=self.device_index,compute_type=self.compute_type)
 
         logger.info(f"Loading audio file: {self.audio_path}")
         audio = whisperx.load_audio(self.audio_path)

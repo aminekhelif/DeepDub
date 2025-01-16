@@ -35,7 +35,8 @@ def process_single_file(
     compute_type,
     HF_token,
     num_speakers=None,
-    language=None
+    language=None,
+    device_index=0
 ):
     """
     Process a single file (audio or video) using the Preprocessing class.
@@ -53,6 +54,7 @@ def process_single_file(
         audio_separator_model=audio_separator_model,
         diarization_batch_size=diarization_batch_size,
         device=device,
+        device_index=device_index,
         compute_type=compute_type,
         HF_token=HF_token,
         num_speakers=num_speakers,
@@ -206,11 +208,16 @@ def main():
         device = config["device"]
     else:
         # Automatic detection
-        device = (
-            "cuda" if torch.cuda.is_available()
-            else "mps" if torch.backends.mps.is_available()
-            else "cpu"
-        )
+            if torch.cuda.is_available():
+                num_gpus = torch.cuda.device_count()
+                device_index = list(range(num_gpus))
+                device = 'cuda'
+            elif torch.backends.mps.is_available():
+                device = 'mps'
+                device_index = 0
+            else:
+                device = 'cpu'
+                device_index = 0
 
     def is_valid_extension(fname: str, exts) -> bool:
         """Helper to check if a file has an allowed extension."""
@@ -276,7 +283,8 @@ def main():
                 compute_type=compute_type,
                 HF_token=HF_token,
                 language="en",
-                num_speakers=None
+                num_speakers=None,
+                device_index=device_index
             )
             from_json = diar_results.get("diarization_data")
             speaker_count = get_speaker_count(from_json)
@@ -297,7 +305,8 @@ def main():
                     compute_type=compute_type,
                     HF_token=HF_token,
                     language="fr",
-                    num_speakers=speaker_count
+                    num_speakers=speaker_count,
+                    device_index=device_index
                 )
             else:
                 # For now, skip all else

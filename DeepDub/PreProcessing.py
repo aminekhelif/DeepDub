@@ -9,7 +9,7 @@ from DeepDub.logger import logger
 class Preprocessing:
     def __init__(self, input_video=None, output_dir=None, 
                  audio_separator_model="Mel-RoFormer", 
-                 diarization_batch_size=16, device="cpu", compute_type="int8", HF_token=None,num_speakers=None,language=None):
+                 diarization_batch_size=16, device="cpu", compute_type="int8", HF_token=None,num_speakers=None,language=None,device_index=0):
         """
         Initializes the Preprocessing class.
         
@@ -46,6 +46,7 @@ class Preprocessing:
         self.concatenated_audio_dir = None
         self.num_speakers = num_speakers
         self.language = language
+        self.device_index = device_index
 
     def split_audio_and_video(self):
         """
@@ -128,7 +129,8 @@ class Preprocessing:
             compute_type=self.compute_type,
             HF_token=self.HF_token,
             num_speakers=self.num_speakers,
-            language=self.language
+            language=self.language,
+            device_index=self.device_index
         )
 
         self.diarization_data = diarizer.perform_diarization()
