@@ -1,4 +1,5 @@
 import os
+import shutil
 from moviepy.editor import VideoFileClip
 from DeepDub.logger import logger
 
@@ -8,19 +9,25 @@ class VideoProcessor:
         Initialize the VideoProcessor with input video path and a central processing directory.
         
         Parameters:
-        input_video (str): Path to the input video file.
+        input_video (str): Path to the input video or audio file.
         processing_dir (str, optional): Central directory for saving outputs.
         """
-        # Absolute path of the input video
+        # Check that the file exists
         if not input_video or not os.path.exists(input_video):
-            raise ValueError(f"Input video not found: {input_video}")
+            raise ValueError(f"Input file not found: {input_video}")
         self.input_video = os.path.abspath(input_video)
         
-        # Set processing directory, defaulting to the input video's directory
-        self.processing_dir = os.path.abspath(processing_dir) if processing_dir else os.path.dirname(self.input_video)
+        # Set processing directory, defaulting to the input file's directory
+        self.processing_dir = (
+            os.path.abspath(processing_dir)
+            if processing_dir else
+            os.path.dirname(self.input_video)
+        )
         
-        # Derive output file paths relative to the processing directory
+        # Derive the base name (without extension) for output files
         base_name = os.path.splitext(os.path.basename(self.input_video))[0]
+        
+        # Construct output paths for audio and "video without audio"
         self.output_audio = os.path.join(self.processing_dir, f"{base_name}_audio.mp3")
         self.output_video_no_audio = os.path.join(self.processing_dir, f"{base_name}_no_audio.mp4")
         
@@ -29,15 +36,40 @@ class VideoProcessor:
 
     def split_audio_video(self):
         """
-        Extracts the audio from the input video and creates a version of the video without audio.
+        - If the input is a video, extracts the audio and generates a video without audio.
+        - If the input is an audio file, copies it to the processing directory using the
+          naming convention "<base_name>_audio.mp3" and does not produce a video.
         
         Returns:
-        tuple: A tuple containing the paths to the extracted audio file and the video without audio.
+        tuple: (path_to_audio, path_to_video_no_audio or None)
         """
-        logger.info(f"Processing video: {self.input_video}")
+        logger.info(f"Processing file: {self.input_video}")
         
-        # Load the video
+        # Simple check based on file extension to distinguish audio from video
+        _, ext = os.path.splitext(self.input_video)
+        ext = ext.lower()
+        
+        # Common audio file extensions (you can add more as needed)
+        audio_extensions = [".mp3", ".wav", ".m4a", ".flac", ".ogg", ".aac"]
+        
+        if ext in audio_extensions:
+            # If the file is audio, just copy (or rename) it to the expected output_audio path
+            logger.info("Detected input as an audio file. Skipping video extraction.")
+            
+            # If it's already .mp3, we can just copy. Otherwise, you might
+            # want to convert to MP3 or keep the same format. Below is a simple copy:
+            shutil.copy2(self.input_video, self.output_audio)
+            
+            # We don't create a video without audio in this case
+            self.output_video_no_audio = None
+            
+            logger.info(f"Audio copied to: {self.output_audio}")
+            logger.info("No 'video without audio' is generated because input is audio-only.")
+            return self.output_audio, self.output_video_no_audio
+        
+        # Otherwise, assume it's a video file.
         try:
+            # Try loading the video
             video = VideoFileClip(self.input_video)
         except Exception as e:
             logger.error(f"Error loading video: {e}")
@@ -55,9 +87,13 @@ class VideoProcessor:
             # Create and save the video without audio
             logger.info(f"Creating video without audio: {self.output_video_no_audio}")
             video_without_audio = video.without_audio()
-            video_without_audio.write_videofile(self.output_video_no_audio, codec='libx264', audio=False)
+            video_without_audio.write_videofile(
+                self.output_video_no_audio, 
+                codec='libx264',
+                audio=False
+            )
         finally:
-            # Ensure that resources are released properly
+            # Clean up MoviePy objects
             video.close()
             if 'video_without_audio' in locals():
                 video_without_audio.close()
