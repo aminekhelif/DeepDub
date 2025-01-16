@@ -31,7 +31,9 @@ def process_single_file(
     diarization_batch_size,
     device,
     compute_type,
-    HF_token
+    HF_token,
+    num_speakers=None,
+    language=None
 ):
     """
     Process a single file (audio or video) using the Preprocessing class.
@@ -51,7 +53,9 @@ def process_single_file(
         diarization_batch_size=diarization_batch_size,
         device=device,
         compute_type=compute_type,
-        HF_token=HF_token
+        HF_token=HF_token,
+        num_speakers=num_speakers,
+        language=language
     )
 
     print(f"\n=== Processing: {input_file} ===")
@@ -224,7 +228,9 @@ def main():
             diarization_batch_size=diarization_batch_size,
             device=device,
             compute_type=compute_type,
-            HF_token=HF_token
+            HF_token=HF_token,
+            num_speakers=None,
+            language=None
         )
 
 if __name__ == "__main__":
