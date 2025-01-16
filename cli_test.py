@@ -181,8 +181,6 @@ def main():
             else "cpu"
         )
 
-    # Now proceed with your file or directory logic
-
     def is_valid_extension(fname: str, exts) -> bool:
         """Helper to check if a file has an allowed extension."""
         return fname.lower().endswith(exts)
@@ -207,6 +205,8 @@ def main():
     else:
         # input_path is a directory, so we walk through it
         for root, dirs, files in os.walk(args.input_path):
+            if 'output_directory' in root:
+                continue
             for file_name in files:
                 # If user specified multiple extensions, skip files that don't match
                 if user_extensions:
