@@ -3,11 +3,13 @@ import sys
 import argparse
 import yaml
 import torch
+import pathlib
+import json
+from collections import defaultdict
 
 sys.path.append("../")
 from DeepDub.PreProcessing import Preprocessing
 
-import pathlib
 
 def load_config(config_path=None):
     if config_path is None:
@@ -37,8 +39,7 @@ def process_single_file(
 ):
     """
     Process a single file (audio or video) using the Preprocessing class.
-    Creates an output directory with the same base name (no extension)
-    next to the file being processed.
+    Returns the diarization_results dict so we can parse #speakers if needed.
     """
     # Create an output directory next to the input file
     file_dir = os.path.dirname(input_file)
@@ -85,6 +86,32 @@ def process_single_file(
     paths = preprocessing.get_paths()
     for key, value in paths.items():
         print(f"{key}: {value}")
+
+    # Return the diarization results so we can parse #speakers outside
+    return diarization_results
+
+
+def get_speaker_count(diar_json_path):
+    """
+    Given a diarization JSON file path, return
+    the number of unique speakers found.
+    """
+    if not os.path.isfile(diar_json_path):
+        return None
+
+    with open(diar_json_path, "r") as f:
+        diar_data = json.load(f)
+
+    # Adjust if your diar.json structure is different;
+    # below we assume a list of segments with "label": "SPEAKER_XX".
+    speaker_labels = set()
+    for seg in diar_data.get("segments", []):
+        label = seg.get("label")
+        if label is not None:
+            speaker_labels.add(label)
+
+    return len(speaker_labels) if speaker_labels else None
+
 
 def main():
     """
@@ -197,7 +224,7 @@ def main():
 
     # ------------------------------------------------------
     #  Pre-snapshot Implementation: Gather all files first,
-    #  then process them to avoid infinite recursion.
+    #  skip "output_directory" if found, then group by folder
     # ------------------------------------------------------
     files_to_process = []
 
@@ -205,8 +232,11 @@ def main():
     if os.path.isfile(args.input_path):
         files_to_process.append(args.input_path)
     else:
-        # Otherwise, recursively collect matching files
         for root, dirs, files in os.walk(args.input_path):
+            # Skip any directory path that includes 'output_directory'
+            if "output_directory" in root:
+                continue
+
             for file_name in files:
                 if user_extensions:
                     # If user gave custom extensions
@@ -220,18 +250,59 @@ def main():
                         full_path = os.path.join(root, file_name)
                         files_to_process.append(full_path)
 
-    # Now we process all pre-collected files
-    for file_path in files_to_process:
-        process_single_file(
-            input_file=file_path,
-            audio_separator_model=audio_separator_model,
-            diarization_batch_size=diarization_batch_size,
-            device=device,
-            compute_type=compute_type,
-            HF_token=HF_token,
-            num_speakers=None,
-            language=None
-        )
+    # Group files by parent directory
+    dir_map = defaultdict(list)
+    for fpath in files_to_process:
+        parent_dir = os.path.dirname(fpath)
+        dir_map[parent_dir].append(fpath)
+
+    # Process English (VO_anglais) first to get speaker count, then French (VF*, VFF*, VFQ*) with that count
+    for folder_path, file_list in dir_map.items():
+        english_path = None
+        for fpath in file_list:
+            base = os.path.basename(fpath).lower()
+            if "vo_anglais" in base:
+                english_path = fpath
+                break
+
+        speaker_count = None
+        # Process English first
+        if english_path:
+            diar_results = process_single_file(
+                input_file=english_path,
+                audio_separator_model=audio_separator_model,
+                diarization_batch_size=diarization_batch_size,
+                device=device,
+                compute_type=compute_type,
+                HF_token=HF_token,
+                language="en",
+                num_speakers=None
+            )
+            from_json = diar_results.get("diarization_data")
+            speaker_count = get_speaker_count(from_json)
+            print(f"English speaker_count: {speaker_count}")
+
+        # Now process French files in the same folder
+        for fpath in file_list:
+            if fpath == english_path:
+                continue
+            base = os.path.basename(fpath).lower()
+            # If it starts with 'vf' or 'vff' or 'vfq'...
+            if base.startswith("vf"):
+                process_single_file(
+                    input_file=fpath,
+                    audio_separator_model=audio_separator_model,
+                    diarization_batch_size=diarization_batch_size,
+                    device=device,
+                    compute_type=compute_type,
+                    HF_token=HF_token,
+                    language="fr",
+                    num_speakers=speaker_count
+                )
+            else:
+                # For now, skip all else
+                pass
+
 
 if __name__ == "__main__":
     main()
