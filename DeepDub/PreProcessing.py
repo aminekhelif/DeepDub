@@ -16,11 +16,8 @@ class Preprocessing:
                  num_speakers=None,
                  language=None,
                  device_index=0,
-                 metadata_dir=None   # <--- NEW ARG
+                 metadata_dir=None
                  ):
-        """
-        Initializes the Preprocessing class, storing references and defaults.
-        """
         self.input_video = os.path.abspath(input_video) if input_video else None
 
         if output_dir:
@@ -50,7 +47,7 @@ class Preprocessing:
         self.speaker_audio_dir = None
         self.concatenated_audio_dir = None
 
-        # NEW: store metadata_dir
+        # We'll store but not necessarily use
         self.metadata_dir = metadata_dir
 
     def split_audio_and_video(self):
@@ -62,7 +59,6 @@ class Preprocessing:
         processor = VideoProcessor(self.input_video, processing_dir=self.base_output_dir)
         extracted_audio, video_no_audio = processor.split_audio_video()
 
-        # Move them into base_output_dir if needed
         if extracted_audio:
             new_extracted = os.path.join(self.base_output_dir, os.path.basename(extracted_audio))
             if extracted_audio != new_extracted:
@@ -87,7 +83,6 @@ class Preprocessing:
 
         vocals_path, background_path = self.audio_separator.separate(self.extracted_audio_path)
 
-        # Rename to a stable name in base_output_dir
         new_vocals_path = os.path.join(self.base_output_dir, "vocals.mp3")
         new_background_path = os.path.join(self.base_output_dir, "instrumental.mp3")
 
@@ -121,7 +116,7 @@ class Preprocessing:
             num_speakers=self.num_speakers,
             language=self.language,
             device_index=self.device_index,
-            metadata_dir=self.metadata_dir  # pass along
+            metadata_dir=self.metadata_dir  # pass along but it won't move segment metadata
         )
         diar_json_path = diarizer.perform_diarization()
         self.speaker_audio_dir = diarizer.extract_speaker_audio()

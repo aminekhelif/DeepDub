@@ -10,19 +10,20 @@ from whisperX import whisperx
 from DeepDub.logger import logger
 
 class AudioDiarization:
-    def __init__(self, 
-                 audio_path, 
-                 diarization_dir=None, 
-                 batch_size=16, 
-                 device="cpu", 
-                 compute_type="int8", 
-                 HF_token=None, 
-                 model_size="large-v3",
-                 num_speakers=None,
-                 language=None,
-                 device_index=0,
-                 metadata_dir=None    # <--- NEW
-                 ):
+    def __init__(
+        self, 
+        audio_path, 
+        diarization_dir=None, 
+        batch_size=16, 
+        device="cpu", 
+        compute_type="int8", 
+        HF_token=None, 
+        model_size="large-v3",
+        num_speakers=None,
+        language=None,
+        device_index=0,
+        metadata_dir=None  # We won't use it for segment metadata
+    ):
         if not audio_path or not os.path.exists(audio_path):
             raise ValueError(f"Invalid audio_path for diarization: {audio_path}")
 
@@ -40,7 +41,7 @@ class AudioDiarization:
         self.diarization_dir = diarization_dir if diarization_dir else os.path.join(self.input_folder, "diarization")
         self.speaker_audio_dir = os.path.join(self.diarization_dir, "speaker_audio")
 
-        # NEW: optional metadata directory
+        # We'll store but not use for segment metadata
         self.metadata_dir = metadata_dir
 
         os.makedirs(self.diarization_dir, exist_ok=True)
@@ -65,40 +66,25 @@ class AudioDiarization:
         audio = whisperx.load_audio(self.audio_path)
 
         logger.info("Transcribing audio...")
-        result = model.transcribe(
-            audio, 
-            batch_size=self.batch_size, 
-            language=self.language
-        )
+        result = model.transcribe(audio, batch_size=self.batch_size, language=self.language)
 
         logger.info("Loading alignment model...")
-        align_model, metadata = whisperx.load_align_model(
-            result["language"], device=self.device
-        )
+        align_model, metadata = whisperx.load_align_model(result["language"], device=self.device)
 
         logger.info("Aligning transcription...")
-        result = whisperx.align(
-            result["segments"], 
-            align_model, 
-            metadata, 
-            audio, 
-            self.device
-        )
+        result = whisperx.align(result["segments"], align_model, metadata, audio, self.device)
 
         logger.info("Performing speaker diarization...")
-        diarize_model = whisperx.DiarizationPipeline(
-            use_auth_token=self.HF_token, 
-            device=self.device
-        )
+        diarize_model = whisperx.DiarizationPipeline(use_auth_token=self.HF_token, device=self.device)
         diar_segments = diarize_model(audio, num_speakers=self.num_speakers)
 
         logger.info("Assigning speaker labels...")
         result = whisperx.assign_word_speakers(diar_segments, result)
 
+        # Save diar.json (full) + diar_simple.json
         full_json_path = os.path.join(self.diarization_dir, "diar.json")
         self.save_json(result, full_json_path)
 
-        # Save a simplified diarization
         simplified_segments = [
             {k: v for k, v in seg.items() if k != "words"}
             for seg in result["segments"]
@@ -129,7 +115,6 @@ class AudioDiarization:
 
             start, end = segment["start"], segment["end"]
             speaker = segment.get("speaker", "Unknown")
-
             if start >= end or start < 0 or end > total_audio_duration:
                 logger.warning(f"Skipping segment {idx}: Invalid time range.")
                 continue
@@ -146,30 +131,21 @@ class AudioDiarization:
             segment_dir = os.path.join(speaker_dir, f"segment_{idx}")
             os.makedirs(segment_dir, exist_ok=True)
 
-            # Save the segment audio
+            # Save audio
             audio_path = os.path.join(segment_dir, "audio.wav")
             sf.write(audio_path, segment_audio.numpy().T, sample_rate)
 
-            # Prepare metadata
+            # Save metadata in segment folder
             metadata = dict(segment)
+            # relative path inside "speaker_audio/" folder
             metadata["audio_file"] = os.path.relpath(audio_path, self.speaker_audio_dir)
 
-            # Decide where to save metadata.json
-            if self.metadata_dir:
-                # Put all metadata in a user-defined directory
-                # We can name it like f"speaker_{speaker}_segment_{idx}.json" or similar
-                # or keep same sub-structure
-                meta_file_name = f"{os.path.basename(segment_dir)}_metadata.json"
-                metadata_file_path = os.path.join(self.metadata_dir, speaker, meta_file_name)
-            else:
-                # Default: in the segment folder
-                metadata_file_path = os.path.join(segment_dir, "metadata.json")
-
-            os.makedirs(os.path.dirname(metadata_file_path), exist_ok=True)
+            # Always place "metadata.json" here in segment_dir
+            metadata_file_path = os.path.join(segment_dir, "metadata.json")
             self.save_json(metadata, metadata_file_path)
 
         return self.speaker_audio_dir
-    
+
     def get_speakers(self):
         if not os.path.exists(self.speaker_audio_dir):
             logger.error(f"Speaker audio folder not found: {self.speaker_audio_dir}")
@@ -186,7 +162,8 @@ class AudioDiarization:
         for speaker in self.get_speakers():
             speaker_dir = os.path.join(self.speaker_audio_dir, speaker)
             segment_dirs = [
-                os.path.join(speaker_dir, d) for d in os.listdir(speaker_dir)
+                os.path.join(speaker_dir, d)
+                for d in os.listdir(speaker_dir)
                 if os.path.isdir(os.path.join(speaker_dir, d))
             ]
             if not segment_dirs:
@@ -197,8 +174,6 @@ class AudioDiarization:
             sample_rates = set()
             for segment_dir in segment_dirs:
                 metadata_file = os.path.join(segment_dir, "metadata.json")
-                # If we used a separate metadata_dir, we might not have "metadata.json" here
-                # but let's keep the original logic. Adapt if needed.
                 if not os.path.exists(metadata_file):
                     logger.warning(f"Skipping segment in {segment_dir}: metadata.json not found.")
                     continue
@@ -212,7 +187,6 @@ class AudioDiarization:
                     continue
 
                 data, samplerate = sf.read(audio_file)
-                # Convert to mono
                 if data.ndim == 1:
                     data = data.reshape(-1, 1)
                 elif data.ndim == 2:
@@ -236,6 +210,7 @@ class AudioDiarization:
 
             out_wav = os.path.join(speaker_dir, f"{speaker}_concatenated.wav")
             sf.write(out_wav, concatenated_audio, sample_rate)
+
             out_json = os.path.join(speaker_dir, f"{speaker}_concatenated_metadata.json")
             self.save_json(concatenated_metadata, out_json)
 
