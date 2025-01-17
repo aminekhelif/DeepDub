@@ -55,7 +55,12 @@ def load_config(config_path=None):
         return {}
 
 def save_metadata(meta: dict, meta_path: str):
-    os.makedirs(os.path.dirname(meta_path), exist_ok=True)
+    """
+    Saves the metadata dict to 'meta_path', ensuring the directory exists.
+    If 'os.path.dirname(meta_path)' is empty, we default to '.' (current dir).
+    """
+    dir_path = os.path.dirname(meta_path) or "."  # Fallback if empty
+    os.makedirs(dir_path, exist_ok=True)
     with open(meta_path, "w") as f:
         json.dump(meta, f, indent=4)
 
@@ -107,8 +112,7 @@ def run_split(preprocessing: Preprocessing, meta: dict, meta_path: str):
         split_audio=extracted_audio, 
         video_no_audio=video_no_audio
     )
-
-    ### SAVE AFTER STEP ###
+    # Immediately save
     save_metadata(meta, meta_path)
 
 def run_separate(preprocessing: Preprocessing, meta: dict, meta_path: str):
@@ -129,8 +133,7 @@ def run_separate(preprocessing: Preprocessing, meta: dict, meta_path: str):
         vocals=vocals,
         background=background
     )
-
-    ### SAVE AFTER STEP ###
+    # Immediately save
     save_metadata(meta, meta_path)
 
 def run_diar(preprocessing: Preprocessing, meta: dict, meta_path: str):
@@ -152,8 +155,7 @@ def run_diar(preprocessing: Preprocessing, meta: dict, meta_path: str):
         meta, input_file,
         diarization_data=diar_data
     )
-
-    ### SAVE AFTER STEP ###
+    # Immediately save
     save_metadata(meta, meta_path)
 
 ###############################################################################
@@ -197,7 +199,7 @@ def process_single_file(
     compute_type: str,
     HF_token: str,
     meta: dict,
-    meta_path: str,  # NEW OR UPDATED: pass meta_path so we can save immediately
+    meta_path: str,
     num_speakers=None,
     language=None,
     device_index=0,
@@ -231,10 +233,11 @@ def process_single_file(
     do_separate = "separate" in steps
     do_diar = "diar" in steps
 
+    # Step: SPLIT
     if do_split:
         run_split(preprocessing, meta, meta_path)
     else:
-        # If skipping, restore from meta if previously done
+        # If skipping split, restore from meta if previously done
         prev_audio = meta["files"].get(input_file, {}).get("split_audio")
         if prev_audio and os.path.isfile(prev_audio):
             preprocessing.extracted_audio_path = prev_audio
@@ -242,6 +245,7 @@ def process_single_file(
             print(f"Warning: No existing split audio found for {input_file}. Step 'split' was skipped.")
             return
 
+    # Step: SEPARATE
     if do_separate:
         run_separate(preprocessing, meta, meta_path)
     else:
@@ -252,6 +256,7 @@ def process_single_file(
             print(f"Warning: No existing vocals file found for {input_file}. Step 'separate' was skipped.")
             return
 
+    # Step: DIAR
     if do_diar:
         run_diar(preprocessing, meta, meta_path)
     else:
@@ -435,7 +440,7 @@ def main():
                     compute_type=compute_type,
                     HF_token=HF_token,
                     meta=meta,
-                    meta_path=meta_path,  # pass meta_path so we can save after each step
+                    meta_path=meta_path,
                     language="en",
                     num_speakers=None,
                     device_index=device_index,
@@ -465,7 +470,7 @@ def main():
                         compute_type=compute_type,
                         HF_token=HF_token,
                         meta=meta,
-                        meta_path=meta_path,  # <--- Save after each step
+                        meta_path=meta_path,
                         language="fr",
                         num_speakers=speaker_count,
                         device_index=device_index,
