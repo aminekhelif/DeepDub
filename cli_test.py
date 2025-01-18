@@ -131,7 +131,37 @@ def get_speaker_count(diar_json_path: str):
     return len(speaker_labels) if speaker_labels else None
 
 ###############################################################################
-# 4) process_single_file logic
+# 4) Step Skip Checks (NEW)
+###############################################################################
+def split_already_done(meta: dict, input_file: str) -> bool:
+    """
+    Returns True if 'split_audio' is in the metadata for this file
+    AND the file physically exists on disk.
+    """
+    info = meta["files"].get(input_file, {})
+    sp_audio = info.get("split_audio")
+    return bool(sp_audio and os.path.isfile(sp_audio))
+
+def separate_already_done(meta: dict, input_file: str) -> bool:
+    """
+    Returns True if 'vocals' is in the metadata for this file
+    AND the file physically exists on disk (same for background if you want).
+    """
+    info = meta["files"].get(input_file, {})
+    v_path = info.get("vocals")
+    return bool(v_path and os.path.isfile(v_path))
+
+def diar_already_done(meta: dict, input_file: str) -> bool:
+    """
+    Returns True if 'diarization_data' is in the metadata for this file
+    AND the diar_simple.json file physically exists on disk.
+    """
+    info = meta["files"].get(input_file, {})
+    diar_path = info.get("diarization_data")
+    return bool(diar_path and os.path.isfile(diar_path))
+
+###############################################################################
+# 5) process_single_file logic
 ###############################################################################
 def process_single_file(
     input_file: str,
@@ -148,9 +178,14 @@ def process_single_file(
     device_index=0,
     metadata_dir=None
 ):
+    """
+    We fix the output_dir so each file gets a distinct subfolder:
+      /folder_of_file/<base_name>/output_directory
+    This ensures no overwriting.
+    """
     file_dir = os.path.dirname(input_file)
-    # We do not append base_name, so everything goes in "output_directory"
-    output_dir = os.path.join(file_dir, "output_directory")
+    file_basename = os.path.splitext(os.path.basename(input_file))[0]
+    output_dir = os.path.join(file_dir, file_basename, "output_directory")
 
     preprocessing = Preprocessing(
         input_video=input_file,
@@ -163,16 +198,22 @@ def process_single_file(
         num_speakers=num_speakers,
         language=language,
         device_index=device_index,
-        metadata_dir=metadata_dir  # we won't use this for segments
+        metadata_dir=metadata_dir
     )
 
     do_split = "split" in steps
     do_separate = "separate" in steps
     do_diar = "diar" in steps
 
+    # Step: SPLIT
     if do_split:
-        run_split(preprocessing, meta, meta_path)
+        # Check if it was already done
+        if split_already_done(meta, input_file):
+            print(f"Skipping SPLIT for {input_file}, already done.")
+        else:
+            run_split(preprocessing, meta, meta_path)
     else:
+        # If skipping, restore from meta if previously done
         prev_audio = meta["files"].get(input_file, {}).get("split_audio")
         if prev_audio and os.path.isfile(prev_audio):
             preprocessing.extracted_audio_path = prev_audio
@@ -180,8 +221,13 @@ def process_single_file(
             print(f"Warning: No existing split audio found for {input_file}. Step 'split' was skipped.")
             return
 
+    # Step: SEPARATE
     if do_separate:
-        run_separate(preprocessing, meta, meta_path)
+        # Check if it was already done
+        if separate_already_done(meta, input_file):
+            print(f"Skipping SEPARATE for {input_file}, already done.")
+        else:
+            run_separate(preprocessing, meta, meta_path)
     else:
         prev_vocals = meta["files"].get(input_file, {}).get("vocals")
         if prev_vocals and os.path.isfile(prev_vocals):
@@ -190,15 +236,20 @@ def process_single_file(
             print(f"Warning: No existing vocals file found for {input_file}. Step 'separate' was skipped.")
             return
 
+    # Step: DIAR
     if do_diar:
-        run_diar(preprocessing, meta, meta_path)
+        if diar_already_done(meta, input_file):
+            print(f"Skipping DIAR for {input_file}, already done.")
+        else:
+            run_diar(preprocessing, meta, meta_path)
+
     print("\nFinal Output Paths:")
     paths = preprocessing.get_paths()
     for k, v in paths.items():
         print(f"{k}: {v}")
 
 ###############################################################################
-# 5) Main
+# 6) Main
 ###############################################################################
 def main():
     parser = argparse.ArgumentParser(description="Process audio/video files in separate steps.")
@@ -206,16 +257,16 @@ def main():
                         help="Path to a single file or directory containing files to process.")
     parser.add_argument("--extensions", type=str, nargs="*",
                         default=None,
-                        help="Extensions to process (e.g. mp3, mp4).")
+                        help="One or more file extensions to process (e.g. mp3, mp4).")
     parser.add_argument("--audio_separator_model", type=str,
                         default=None,
-                        help="Model for audio separation.")
+                        help="Which model for audio separation.")
     parser.add_argument("--diarization_batch_size", type=int,
                         default=None,
                         help="Batch size for diarization.")
     parser.add_argument("--compute_type", type=str,
                         default=None,
-                        help="Compute precision type for WhisperX (int8, float16, etc.).")
+                        help="WhisperX compute type: 'int8', 'float16', etc.")
     parser.add_argument("--HF_token", type=str,
                         default=None,
                         help="Hugging Face token if needed.")
@@ -224,13 +275,13 @@ def main():
                         help="Path to a config YAML file.")
     parser.add_argument("--metadata_file", type=str,
                         default="metadata.json",
-                        help="Where to store/read the JSON metadata.")
+                        help="Where to store/read the JSON metadata about splitted/separated/diarized files.")
     parser.add_argument("--steps", type=str,
                         default="split,separate,diar",
-                        help="Comma-separated steps: split,separate,diar.")
+                        help="Comma-separated list of steps to run: [split, separate, diar].")
     parser.add_argument("--metadata_dir", type=str,
                         default=None,
-                        help="(Not used for segment metadata)")
+                        help="Optional directory where segment metadata.json files should be saved. (Not used for segment-level metadata in this code)")
 
     args = parser.parse_args()
     config = load_config(args.config_file)
@@ -303,7 +354,7 @@ def main():
                         full_path = os.path.join(root, f)
                         files_to_process.append(os.path.abspath(full_path))
 
-    # If 'diar' in steps, do English->French priority
+    # If 'diar' is in steps, do the English->French priority
     if "diar" in steps_to_run:
         dir_map = defaultdict(list)
         for fpath in files_to_process:
