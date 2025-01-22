@@ -362,7 +362,9 @@ def enhanced_demo_alignment(
 # 5) The Main Script
 ###############################################################################
 if __name__ == "__main__":
-    # Adjust these parameters as you wish
+    import sys
+
+    # Alignment parameters
     min_merge_durations = 0.5
     max_gap_before_merges = 4.0
     merge_speakers_options = True
@@ -370,6 +372,11 @@ if __name__ == "__main__":
     overlap_threshold = 0.8
 
     base_dir = "Data"
+
+    # An option to do one big merged JSON
+    merge_matched_segments = False
+    if len(sys.argv) > 1 and sys.argv[1].lower() == "merge_all":
+        merge_matched_segments = True
 
     # 1) Find all FILM* directories
     film_dirs = sorted(glob.glob(os.path.join(base_dir, "FILM*")))
@@ -411,3 +418,48 @@ if __name__ == "__main__":
             overlap_mode=overlap_modes,
             output_path=output_path
         )
+
+    ###########################################################################
+    # If user wants to merge all matched_segments into one big JSON:
+    ###########################################################################
+    if merge_matched_segments:
+        all_matches = []
+
+        for film_dir in film_dirs:
+            matched_file = os.path.join(film_dir, "matched_segments.json")
+            if not os.path.exists(matched_file):
+                continue
+
+            # The film folder name, e.g. "FILM33"
+            film_name = os.path.basename(film_dir)
+
+            print(f"[Merging] {matched_file} into global JSON. Prefixing audio paths with /{film_name} ...")
+
+            with open(matched_file, 'r', encoding='utf-8') as f_in:
+                matches = json.load(f_in)
+
+            # For every match, for both english/french, we update audio_paths
+            for match in matches:
+                # English
+                audio_paths = match["english"]["audio_paths"]
+                # e.g. "/VF/output_directory/...". We want "/FILM33/VF/output_directory..."
+                new_audio_paths = []
+                for path in audio_paths:
+                    new_audio_paths.append(f"/{film_name}{path}")  # prefix /FILM33
+                match["english"]["audio_paths"] = new_audio_paths
+
+                # French
+                audio_paths = match["french"]["audio_paths"]
+                new_audio_paths = []
+                for path in audio_paths:
+                    new_audio_paths.append(f"/{film_name}{path}") 
+                match["french"]["audio_paths"] = new_audio_paths
+
+                all_matches.append(match)
+
+        # Save the big merged JSON in Data/
+        merged_output = os.path.join(base_dir, "merged_all_films.json")
+        with open(merged_output, 'w', encoding='utf-8') as f_out:
+            json.dump(all_matches, f_out, indent=2, ensure_ascii=False)
+
+        print(f"\n[Done] Wrote merged JSON of all films to: {merged_output}\n")
