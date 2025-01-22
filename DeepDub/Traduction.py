@@ -1,84 +1,126 @@
 import os
-import openai
 import json
+import getpass
+from typing import List, Optional
 
-# ====== CONFIGURATION ======
-openai.api_key = "sk-..."                 # Your OpenAI API key
-model_name = "gpt-3.5-turbo"            # Model to use for translation
-target_language = "French"               # Change to your desired target language
-input_file_path = "diar_simple.json"         # Input JSON file path
-output_file_path = "example_translated.json"  # Output JSON file path
-# ==========================
+import openai
+from pydantic import BaseModel, ValidationError, RootModel
 
-def translate_text(text, target_language):
-    """
-    Translates the given text into the target_language using OpenAI's ChatCompletion.
-    The system instruction includes a directive for detecting and preserving nuances
-    (idiomatic expressions, cultural references, etc.).
-    """
+# ========= CONFIGURATION ==========
+
+openai_api_key = getpass.getpass("Veuillez saisir votre clé OpenAI : ")
+openai.api_key = openai_api_key  # Clé OpenAI
+
+model_name = "gpt-3.5-turbo"
+target_language = "French"
+input_file_path = "input_text.json"
+output_file_path = "output_text.json"
+CHUNK_SIZE = 30
+
+# ========= PYDANTIC MODELS ==========
+
+class TranslatedSegment(BaseModel):
+    
+    start: Optional[float]
+    end: Optional[float]
+    text: str
+    speaker: Optional[str]
+    translated_text: str
+
+class TranslatedSegmentList(RootModel[List[TranslatedSegment]]):
+    """A root model representing a list of TranslatedSegment objects."""
+
+# ========= FONCTIONS ==========
+
+def build_user_message_for_chunk(chunk: List[dict]) -> str:
+    prompt_intro = (
+        "Below is a list of segments in JSON format. "
+        "For each segment:\n"
+        "- Do NOT modify the 'text' field (it must remain in the source language).\n"
+        f"- Create or fill 'translated_text' with the translation into {target_language}.\n\n"
+        "Return a valid JSON array of objects, where each object preserves the original fields "
+        "(segment, start, end, text) and includes a new field 'translated_text'.\n"
+        "Example:\n"
+        "[\n"
+        "  {\n"
+          
+        "    \"start\": 0.0,\n"
+        "    \"end\": 5.0,\n"
+        "    \"text\": \"This is the original text.\",\n"
+        "    \"speaker\": \"SPEAKER_1\",\n"
+        "    \"translated_text\": \"Voici le texte traduit.\" \n"
+        "  }\n"
+        "]\n\n"
+        "Important:\n"
+        "- Translate from detected source language to the target language.\n"
+        "- Preserve nuances, cultural references, wordplay, idiomatic expressions, etc.\n"
+        "- Any symbols, measurement units, or numbers must be written out in words.\n"
+        
+    )
+
+    chunk_json = json.dumps(chunk, ensure_ascii=False, indent=2)
+    user_message = f"{prompt_intro}\n\nHere is the chunk to translate:\n{chunk_json}\n\n"
+    return user_message
+
+def translate_chunk(chunk: List[dict]) -> List[TranslatedSegment]:
+    user_message = build_user_message_for_chunk(chunk)
+
+    system_prompt = (
+        "You are a highly skilled translator. "
+        "First, read the entire set of segments to fully grasp overall context. "
+        "Then, translate each segment's 'text' field into the target language while preserving context, "
+        "nuances, cultural references, wordplay, idiomatic expressions, acronyms, measurement units, slang, "
+        "and so on. If there's any wordplay or idiomatic expression that needs adaptation, keep the same intent and style. "
+        "make sure to not translate the names of people, companies, or brands. "
+        "All symbols, numbers, or measurement units must be written out in full words in the target language. (e.g., 5 kilometers -> cinq kilomètres, % -> pour cent, $ -> dollars, etc.) "
+    )
+
     try:
-        # We use ChatCompletion with a system message to instruct the model
-        # on how we want the translation to be performed.
         response = openai.ChatCompletion.create(
             model=model_name,
             messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        "You are a highly skilled translator. "
-                        "Your task is to detect the source language automatically and translate it into "
-                        f"{target_language} while preserving context, nuances, cultural references, wordplay, "
-                        "idiomatic expressions, acronyms, measurement units, and slang terms. "
-                        "If there's wordplay or idiomatic expressions that need adaptation, do so while keeping "
-                        "the same intent and style."
-                    )
-                },
-                {
-                    "role": "user",
-                    "content": text
-                }
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_message}
             ],
-            temperature=0.2  # Lower temperature for more consistent translations
+            temperature=0.2
         )
+        llm_output = response["choices"][0]["message"]["content"].strip()
 
-        # Extract the translated text from the response
-        translated_text = response["choices"][0]["message"]["content"].strip()
-        return translated_text
-    
+        # On essaye de parser la réponse comme JSON
+        data = json.loads(llm_output)
+        # On le valide via Pydantic RootModel
+        validated = TranslatedSegmentList.parse_obj(data)
+        return validated.root
+    except (json.JSONDecodeError, ValidationError) as e:
+        print("Erreur de parsing ou de validation Pydantic :", e)
+        return []
     except Exception as e:
-        print(f"Error during translation: {e}")
-        return text  # Fallback to original text if there's an error
+        print(f"Erreur d'appel OpenAI pour le chunk : {e}")
+        return []
 
 def main():
-    # 1. Read the input JSON file
+    
     with open(input_file_path, 'r', encoding='utf-8') as f:
         data = json.load(f)
-    
-    # 2. Iterate over each item in the JSON list and translate the "text" field
-    for item in data:
-        original_text = item.get("text", "")
-        
-        # Provide an option for manual translation
-        print(f"\nOriginal text: {original_text}")
-        #user_input = input(
-            #"Press ENTER to auto-translate OR type/paste your manual translation here:\n> "
-        #).strip()
-        
-        #if user_input:
-            # If user provided a manual translation, use it
-            #translated_text = user_input
-        #else:
-            # Otherwise, auto-translate using OpenAI
-        translated_text = translate_text(original_text, target_language)
-        
-        # Store or update the item with the translated text
-        item["translated_text"] = translated_text
-    
-    # 3. Save the updated data to a new JSON file
+
+    if not isinstance(data, list):
+        raise ValueError("Le fichier d'entrée doit être une liste JSON de segments.")
+
+    all_translated_segments = []
+
+    for i in range(0, len(data), CHUNK_SIZE):
+        chunk = data[i : i + CHUNK_SIZE]
+        print(f"\n--- Traitement du chunk n°{i//CHUNK_SIZE + 1} contenant {len(chunk)} segments ---")
+
+        translated_items = translate_chunk(chunk)
+        # Ajout au tableau global
+        all_translated_segments.extend([item.dict() for item in translated_items])
+
+    # Sauvegarde
     with open(output_file_path, 'w', encoding='utf-8') as f:
-        json.dump(data, f, indent=4, ensure_ascii=False)
-    
-    print(f"\nTranslation complete! Results saved to: {output_file_path}")
+        json.dump(all_translated_segments, f, indent=4, ensure_ascii=False)
+
+    print(f"\nTraduction terminée ! Résultats enregistrés dans : {output_file_path}")
 
 if __name__ == "__main__":
     main()
