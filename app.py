@@ -74,7 +74,10 @@ def separate_audio(input_audio):
         background_spectrogram_path = os.path.join(manager.preprocessor.base_output_dir, "background_spectrogram.png")
         separator.save_spectrogram(vocals_path, vocals_spectrogram_path)
         separator.save_spectrogram(background_path, background_spectrogram_path)
-        update_step_results("separate", vocals_path=vocals_path, background_path=background_path,
+
+        update_step_results("separate",
+                            vocals_path=vocals_path,
+                            background_path=background_path,
                             vocals_spectrogram_path=vocals_spectrogram_path,
                             background_spectrogram_path=background_spectrogram_path)
         return vocals_path, background_path, vocals_spectrogram_path, background_spectrogram_path
@@ -101,7 +104,10 @@ def perform_diarization(input_audio):
         speaker_audio_dir = diarization_data['speaker_audio_dir']
         manager.speaker_audio_structure = parse_speaker_audio_dir(speaker_audio_dir)
 
-        update_step_results("diarization", simplified_json_path=diar_simple_path, speaker_audio_dir=speaker_audio_dir, files_list=[])
+        update_step_results("diarization",
+                            simplified_json_path=diar_simple_path,
+                            speaker_audio_dir=speaker_audio_dir,
+                            files_list=[])
 
         diar_json_content = load_json_file(diar_simple_path)
         # Return the diar_json_content and update the speakers dropdown choices
@@ -201,6 +207,30 @@ def display_speaker_file(speaker, selection):
         audio_comp = audio_path if os.path.exists(audio_path) else None
         return meta_content, audio_comp
 
+# Function to save updated diar_simple.json
+def save_diarization_data(json_text):
+    try:
+        # Attempt to parse as JSON
+        new_data = json.loads(json_text)
+        
+        # Retrieve the path to diar_simple.json
+        diar_simple_path = manager.diar_simple_path
+        if not diar_simple_path or not os.path.exists(diar_simple_path):
+            return "Error: No diarization path found or file doesn't exist."
+        
+        # Overwrite the original file with the updated JSON
+        with open(diar_simple_path, 'w') as f:
+            json.dump(new_data, f, indent=4)
+        
+        # If needed, update the in-memory reference as well
+        manager.preprocessor.diarization_data = new_data
+
+        return "Diarization JSON saved successfully!"
+    except json.JSONDecodeError as e:
+        return f"JSON parsing error: {str(e)}"
+    except Exception as e:
+        return f"Error saving JSON: {str(e)}"
+
 with gr.Blocks() as demo:
     gr.Markdown("## DeepDub - Demo")
 
@@ -211,7 +241,9 @@ with gr.Blocks() as demo:
         video_without_audio = gr.Video(label="Video Without Audio", height=300)
         extracted_audio = gr.Audio(label="Extracted Audio", type="filepath", show_download_button=True, interactive=True)
 
-    split_button.click(split_audio_video, inputs=video_input, outputs=[video_without_audio, extracted_audio])
+    split_button.click(split_audio_video,
+                       inputs=video_input,
+                       outputs=[video_without_audio, extracted_audio])
 
     gr.Markdown("### Step 2: Separate Audio")
     separate_button = gr.Button("Separate Audio")
@@ -222,13 +254,16 @@ with gr.Blocks() as demo:
         vocals_spectrogram = gr.Image(label="Vocals Spectrogram")
         background_spectrogram = gr.Image(label="Background Spectrogram")
 
-    separate_button.click(separate_audio, inputs=extracted_audio, outputs=[vocals_audio, background_audio, vocals_spectrogram, background_spectrogram])
+    separate_button.click(separate_audio,
+                          inputs=extracted_audio,
+                          outputs=[vocals_audio, background_audio, vocals_spectrogram, background_spectrogram])
 
     gr.Markdown("### Step 3: Perform Diarization")
     diarize_button = gr.Button("Perform Diarization")
 
-    # Textbox for diar_simple.json content
-    diar_json_display = gr.Textbox(label="diar_simple.json Content", lines=15, interactive=False)
+    # This Textbox shows and allows editing of diar_simple.json
+    diar_json_display = gr.Textbox(label="diar_simple.json Content", lines=15, interactive=True)
+
     speakers_dropdown = gr.Dropdown(label="Speakers", choices=[], interactive=True)
     speaker_file_dropdown = gr.Dropdown(label="Segments / Concatenated", choices=[], interactive=True)
 
@@ -237,8 +272,26 @@ with gr.Blocks() as demo:
         metadata_display = gr.Textbox(label="Metadata JSON", lines=15, interactive=False)
         file_audio = gr.Audio(label="Audio Player", type="filepath", show_download_button=True, interactive=True)
 
-    diarize_button.click(perform_diarization, inputs=vocals_audio, outputs=[diar_json_display, speakers_dropdown])
-    speakers_dropdown.change(update_speaker_files, inputs=speakers_dropdown, outputs=speaker_file_dropdown)
-    speaker_file_dropdown.change(display_speaker_file, inputs=[speakers_dropdown, speaker_file_dropdown], outputs=[metadata_display, file_audio])
+    diarize_button.click(perform_diarization,
+                         inputs=vocals_audio,
+                         outputs=[diar_json_display, speakers_dropdown])
+
+    # When speaker is selected, we populate the segments/concatenated
+    speakers_dropdown.change(update_speaker_files,
+                             inputs=speakers_dropdown,
+                             outputs=speaker_file_dropdown)
+
+    # When segment or "concatenated" is selected, we display its metadata and audio
+    speaker_file_dropdown.change(display_speaker_file,
+                                 inputs=[speakers_dropdown, speaker_file_dropdown],
+                                 outputs=[metadata_display, file_audio])
+
+    # Button and textbox to confirm saving the JSON edits
+    save_diar_button = gr.Button("Save Diarization Edits")
+    save_status = gr.Textbox(label="Save Status", interactive=False)
+
+    save_diar_button.click(fn=save_diarization_data,
+                           inputs=[diar_json_display],
+                           outputs=[save_status])
 
 demo.launch()
