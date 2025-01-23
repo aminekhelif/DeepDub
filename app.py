@@ -224,8 +224,13 @@ def save_diarization_data(json_text):
         
         # If needed, update the in-memory reference as well
         manager.preprocessor.diarization_data = new_data
+        
+        # Add these lines:
+        logger.info(f"Diarization JSON saved successfully at {diar_simple_path}!")
+        print(f"Diarization JSON saved successfully at {diar_simple_path}!")
 
-        return "Diarization JSON saved successfully!"
+        return f"Diarization JSON saved successfully at {diar_simple_path}!"
+
     except json.JSONDecodeError as e:
         return f"JSON parsing error: {str(e)}"
     except Exception as e:
