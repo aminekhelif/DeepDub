@@ -18,8 +18,8 @@ def _load_config(config_path: str) -> dict:
     with open(config_path, "r", encoding="utf-8") as f:
         return yaml.safe_load(f)
 
-_config = _load_config(CONFIG_PATH)
-_openai_api_key = _config.get("openai_api_key", None)
+_cfg = _load_config(CONFIG_PATH)
+_openai_api_key = _cfg.get("openai_api_key", None)
 if not _openai_api_key:
     raise ValueError("No 'openai_api_key' found in config. Please add it to config.yaml.")
 
@@ -87,7 +87,7 @@ class DeepDubTranslator:
     def translate_json(
         self,
         segments: List[dict],
-        input_file_path: str,
+        diar_json_path: str,
         target_language: str = "French",
         model_name: str = None,
         chunk_size: int = 30
@@ -99,8 +99,10 @@ class DeepDubTranslator:
         if model_name is None:
             model_name = self._default_model
 
-        logger.info("Starting translation with model '%s', language '%s'. Segments: %d",
-                    model_name, target_language, len(segments))
+        logger.info(
+            "Starting translation with model '%s', language '%s'. Segment count: %d",
+            model_name, target_language, len(segments)
+        )
 
         # Build the system prompt
         system_prompt = (
@@ -113,31 +115,27 @@ class DeepDubTranslator:
             "(e.g., '5 km' -> 'cinq kilomètres', '%' -> 'pour cent', '$' -> 'dollars')."
         )
 
-        # Create or derive an output path in the same folder as the input file
-        base_dir = os.path.dirname(input_file_path)
-        base_name = os.path.splitext(os.path.basename(input_file_path))[0]
-        output_file_name = f"{base_name}_translated.json"
-        output_file_path = os.path.join(base_dir, output_file_name)
+        # Create 'diarization_translated.json' next to diar_json_path
+        base_dir = os.path.dirname(diar_json_path)
+        output_file_path = os.path.join(base_dir, "diarization_translated.json")
 
-        all_translated_segments = []
-        # Process segments in chunks
+        all_segments = []
         for i in range(0, len(segments), chunk_size):
             chunk_data = segments[i : i + chunk_size]
             logger.info("Translating chunk %d (size=%d)", (i // chunk_size) + 1, len(chunk_data))
 
-            # Translate a single chunk
             translated_items = self._translate_chunk(
-                chunk=chunk_data,
+                chunk_data,
                 model_name=model_name,
                 system_prompt=system_prompt,
                 target_language=target_language
             )
             # Convert Pydantic models to dict for JSON
-            all_translated_segments.extend(item.dict() for item in translated_items)
+            all_segments.extend(item.dict() for item in translated_items)
 
         # Save final JSON
         with open(output_file_path, "w", encoding="utf-8") as f:
-            json.dump(all_translated_segments, f, indent=4, ensure_ascii=False)
+            json.dump(all_segments, f, indent=4, ensure_ascii=False)
 
         logger.info("Translation complete. File saved at: %s", output_file_path)
         return output_file_path
