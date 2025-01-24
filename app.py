@@ -155,7 +155,7 @@ def parse_speaker_audio_dir(speaker_audio_dir):
 def load_json_file(json_path):
     if not os.path.exists(json_path):
         return "Diarization file not found."
-    with open(json_path, 'r') as f:
+    with open(json_path, 'r', encoding="utf-8") as f:
         content = json.load(f)
     return json.dumps(content, indent=4)
 
@@ -186,7 +186,7 @@ def display_speaker_file(speaker, selection):
         json_path = os.path.join(sp_path, j)
         meta_content = "Metadata file not found."
         if os.path.exists(json_path):
-            with open(json_path, 'r') as f:
+            with open(json_path, 'r', encoding="utf-8") as f:
                 meta = json.load(f)
             meta_content = json.dumps(meta, indent=4)
         audio_comp = wav_path if os.path.exists(wav_path) else None
@@ -201,7 +201,7 @@ def display_speaker_file(speaker, selection):
         json_path = os.path.join(seg_path, seg_json)
         meta_content = "Metadata file not found."
         if os.path.exists(json_path):
-            with open(json_path, 'r') as f:
+            with open(json_path, 'r', encoding="utf-8") as f:
                 meta = json.load(f)
             meta_content = json.dumps(meta, indent=4)
         audio_comp = audio_path if os.path.exists(audio_path) else None
@@ -214,8 +214,8 @@ def save_diarization_data(json_text):
         if not diar_simple_path or not os.path.exists(diar_simple_path):
             return "Error: No diarization path found or file doesn't exist."
         
-        with open(diar_simple_path, 'w') as f:
-            json.dump(new_data, f, indent=4)
+        with open(diar_simple_path, 'w', encoding="utf-8") as f:
+            json.dump(new_data, f, indent=4, ensure_ascii=False)
         manager.preprocessor.diarization_data = new_data
         
         logger.info(f"Diarization JSON saved successfully at {diar_simple_path}!")
@@ -275,9 +275,9 @@ def translate_diar_json():
             )
 
         with open(translated_file_path, "w", encoding="utf-8") as tf:
-            json.dump(translated_content, tf, indent=4)
+            json.dump(translated_content, tf, indent=4, ensure_ascii=False)
 
-        return json.dumps(translated_content, indent=4)
+        return json.dumps(translated_content, indent=4, ensure_ascii=False)
 
     except Exception as exc:
         logger.error(f"Error translating diarization JSON: {exc}")

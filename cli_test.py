@@ -21,7 +21,7 @@ def load_config(config_path=None):
 
     print(f"Looking for config at: {config_path}")
     if os.path.exists(config_path):
-        with open(config_path, "r") as f:
+        with open(config_path, "r", encoding="utf-8") as f:
             return yaml.safe_load(f) or {}
     else:
         print(f"Config file not found. {config_path}")
@@ -101,7 +101,7 @@ def get_speaker_count(diar_json_path):
     if not os.path.isfile(diar_json_path):
         return None
 
-    with open(diar_json_path, "r") as f:
+    with open(diar_json_path, "r", encoding="utf-8") as f:
         diar_data = json.load(f)
 
     # Adjust if your diar.json structure is different;

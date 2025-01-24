@@ -34,8 +34,8 @@ class AudioDiarization:
     
     @staticmethod
     def save_json(data, file_path):
-        with open(file_path, "w") as f:
-            json.dump(data, f, indent=4)
+        with open(file_path, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=4, ensure_ascii=False)
     
     def perform_diarization(self):
         logger.info("Loading Whisper model...")
@@ -80,7 +80,7 @@ class AudioDiarization:
             logger.error(f"Diarization file not found: {diar_simple_path}")
             raise FileNotFoundError(f"Diarization file not found: {diar_simple_path}")
 
-        with open(diar_simple_path, "r") as f:
+        with open(diar_simple_path, "r", encoding="utf-8") as f:
             speaker_segments = json.load(f)
 
         logger.info(f"Loading audio: {self.audio_path}")
@@ -145,7 +145,7 @@ class AudioDiarization:
                 if not os.path.exists(metadata_file):
                     logger.warning(f"Skipping segment in {segment_dir}: Metadata not found.")
                     continue
-                with open(metadata_file, "r") as f:
+                with open(metadata_file, "r", encoding="utf-8") as f:
                     metadata = json.load(f)
 
                 audio_file = os.path.join(self.speaker_audio_dir, metadata["audio_file"])
