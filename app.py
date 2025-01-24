@@ -8,6 +8,7 @@ import soundfile as sf
 from DeepDub.logger import logger
 
 from DeepDub.tm import translator
+from DeepDub.TTSService import synthesize_translated_json
 
 # Load configuration
 with open('./DeepDub/config.yaml', 'r') as file:
@@ -24,6 +25,7 @@ class VideoProcessorManager:
         self.step_results = {}
         self.speaker_audio_structure = {}
         self.diar_simple_path = None
+        self.translated_file_path = None  # We'll store the path to the final translated JSON here.
 
     def initialize(self, input_video=None):
         output_dir = os.path.join(temp_output_dir, "separation_output")
@@ -40,6 +42,7 @@ class VideoProcessorManager:
         self.step_results = {}
         self.speaker_audio_structure = {}
         self.diar_simple_path = None
+        self.translated_file_path = None
 
 manager = VideoProcessorManager()
 
@@ -251,6 +254,9 @@ def translate_diar_json():
             target_language="French"
         )
 
+        # Store this path for the TTS step
+        manager.translated_file_path = translated_file_path
+
         if not os.path.exists(translated_file_path):
             return f"Error: Translated file not found at {translated_file_path}"
 
@@ -264,9 +270,9 @@ def translate_diar_json():
         for i, seg in enumerate(translated_content):
             start_time = seg.get("start", 0)
             end_time = seg.get("end", 0)
-            seg["duration"] = round(end_time - start_time, 3)  
+            seg["duration"] = round(end_time - start_time, 0)
+            speaker_name = seg.get("speaker", "Unknown")
 
-            speaker_name = seg.get("speaker", "SPEAKER_00")  
             seg["audio_path"] = os.path.join(
                 speaker_audio_dir,
                 speaker_name,
@@ -283,6 +289,23 @@ def translate_diar_json():
         logger.error(f"Error translating diarization JSON: {exc}")
         return f"Error translating diarization JSON: {str(exc)}"
 
+# ---------------------------
+# STEP 5: TTS Synthesis
+# ---------------------------
+def run_tts():
+    """
+    Gradio callback for the "Synthesize TTS" button.
+    1) Retrieves manager.translated_file_path
+    2) Calls synthesize_translated_json(...) from TTSService
+    3) Returns the updated JSON string
+    """
+    translated_file = getattr(manager, "translated_file_path", None)
+    if not translated_file or not os.path.exists(translated_file):
+        return "Error: No valid 'diarization_translated.json' found. Please run translation first."
+
+    # Call the TTS function from TTSService
+    result_str = synthesize_translated_json(translated_file)
+    return result_str
 
 ####################
 #   BUILD THE UI
@@ -368,6 +391,17 @@ with gr.Blocks() as demo:
         fn=translate_diar_json,
         inputs=None,
         outputs=[translated_json_display]
+    )
+
+    # Step 5
+    gr.Markdown("### Step 5: TTS Synthesis")
+    tts_button = gr.Button("Synthesize TTS")
+    tts_result_display = gr.Textbox(label="Synthesized JSON", lines=15, interactive=False)
+
+    tts_button.click(
+        fn=run_tts,
+        inputs=None,
+        outputs=[tts_result_display]
     )
 
 demo.launch()
