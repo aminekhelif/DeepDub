@@ -247,16 +247,35 @@ def translate_diar_json():
         # Translate & get path to diarization_translated.json
         translated_file_path = translator.translate_json(
             segments=segments_data,
-            diar_json_path=diar_simple_path,  # no video path used
+            diar_json_path=diar_simple_path,
             target_language="French"
         )
 
-        # Read back the translated JSON to show in a Gradio text box
         if not os.path.exists(translated_file_path):
             return f"Error: Translated file not found at {translated_file_path}"
 
         with open(translated_file_path, "r", encoding="utf-8") as tf:
             translated_content = json.load(tf)
+
+       
+        diarization_dir = os.path.dirname(translated_file_path)
+        speaker_audio_dir = os.path.join(diarization_dir, "speaker_audio")
+
+        for i, seg in enumerate(translated_content):
+            start_time = seg.get("start", 0)
+            end_time = seg.get("end", 0)
+            seg["duration"] = round(end_time - start_time, 3)  
+
+            speaker_name = seg.get("speaker", "SPEAKER_00")  
+            seg["audio_path"] = os.path.join(
+                speaker_audio_dir,
+                speaker_name,
+                f"segment_{i}",
+                "audio.wav"
+            )
+
+        with open(translated_file_path, "w", encoding="utf-8") as tf:
+            json.dump(translated_content, tf, indent=4)
 
         return json.dumps(translated_content, indent=4)
 
