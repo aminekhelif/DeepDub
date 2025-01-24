@@ -7,6 +7,8 @@ import json
 import soundfile as sf
 from DeepDub.logger import logger
 
+from DeepDub.tm import translator
+
 # Load configuration
 with open('./DeepDub/config.yaml', 'r') as file:
     config = yaml.safe_load(file)
@@ -187,7 +189,6 @@ def display_speaker_file(speaker, selection):
             with open(json_path, 'r') as f:
                 meta = json.load(f)
             meta_content = json.dumps(meta, indent=4)
-        # Return just the path if file exists, not a tuple
         audio_comp = wav_path if os.path.exists(wav_path) else None
         return meta_content, audio_comp
     else:
@@ -203,38 +204,77 @@ def display_speaker_file(speaker, selection):
             with open(json_path, 'r') as f:
                 meta = json.load(f)
             meta_content = json.dumps(meta, indent=4)
-        # Again, return just the path if exists
         audio_comp = audio_path if os.path.exists(audio_path) else None
         return meta_content, audio_comp
 
-# Function to save updated diar_simple.json
 def save_diarization_data(json_text):
     try:
-        # Attempt to parse as JSON
         new_data = json.loads(json_text)
-        
-        # Retrieve the path to diar_simple.json
         diar_simple_path = manager.diar_simple_path
         if not diar_simple_path or not os.path.exists(diar_simple_path):
             return "Error: No diarization path found or file doesn't exist."
         
-        # Overwrite the original file with the updated JSON
         with open(diar_simple_path, 'w') as f:
             json.dump(new_data, f, indent=4)
-        
-        # If needed, update the in-memory reference as well
         manager.preprocessor.diarization_data = new_data
         
-        # Add these lines:
         logger.info(f"Diarization JSON saved successfully at {diar_simple_path}!")
         print(f"Diarization JSON saved successfully at {diar_simple_path}!")
 
         return f"Diarization JSON saved successfully at {diar_simple_path}!"
-
     except json.JSONDecodeError as e:
         return f"JSON parsing error: {str(e)}"
     except Exception as e:
         return f"Error saving JSON: {str(e)}"
+
+
+def translate_diar_json(_):
+    """
+    1) Reads the diarization JSON from manager.diar_simple_path (includes any saved edits).
+    2) Uses the translator from tm.py to produce a translated JSON file next to the input video.
+    3) Returns the content of the translated file to display in Gradio.
+    """
+    try:
+        diar_simple_path = manager.diar_simple_path
+        if not diar_simple_path or not os.path.exists(diar_simple_path):
+            return "Error: diar_simple.json path not found. Please run diarization first.", None
+
+        # Load the current JSON from disk (with any saved edits)
+        with open(diar_simple_path, "r", encoding="utf-8") as f:
+            segments_data = json.load(f)
+        if not isinstance(segments_data, list):
+            return "Error: diarization JSON is not a list of segments.", None
+
+        # We need the original video path for translator to place the new file
+        input_video_path = manager.preprocessor.input_video
+        if not input_video_path:
+            return "Error: No input video path found in the manager.", None
+
+        # Call the translator. This method returns the path to the translated JSON
+        translated_file_path = translator.translate_json(
+            segments=segments_data,
+            input_file_path=input_video_path,  # used to construct the final filename
+            target_language="French"  # or any other language from your config
+        )
+
+        # Read back the translated JSON to show in a Gradio text box
+        if not os.path.exists(translated_file_path):
+            return f"Error: Translated file not found at {translated_file_path}", None
+
+        with open(translated_file_path, "r", encoding="utf-8") as tf:
+            translated_content = json.load(tf)
+
+        # Return the pretty JSON and a success message
+        return json.dumps(translated_content, indent=4), None
+
+    except Exception as exc:
+        logger.error(f"Error translating diarization JSON: {exc}")
+        return f"Error translating diarization JSON: {str(exc)}", None
+
+
+####################
+#   BUILD THE UI
+####################
 
 with gr.Blocks() as demo:
     gr.Markdown("## DeepDub - Demo")
@@ -246,9 +286,11 @@ with gr.Blocks() as demo:
         video_without_audio = gr.Video(label="Video Without Audio", height=300)
         extracted_audio = gr.Audio(label="Extracted Audio", type="filepath", show_download_button=True, interactive=True)
 
-    split_button.click(split_audio_video,
-                       inputs=video_input,
-                       outputs=[video_without_audio, extracted_audio])
+    split_button.click(
+        fn=split_audio_video,
+        inputs=video_input,
+        outputs=[video_without_audio, extracted_audio]
+    )
 
     gr.Markdown("### Step 2: Separate Audio")
     separate_button = gr.Button("Separate Audio")
@@ -259,9 +301,11 @@ with gr.Blocks() as demo:
         vocals_spectrogram = gr.Image(label="Vocals Spectrogram")
         background_spectrogram = gr.Image(label="Background Spectrogram")
 
-    separate_button.click(separate_audio,
-                          inputs=extracted_audio,
-                          outputs=[vocals_audio, background_audio, vocals_spectrogram, background_spectrogram])
+    separate_button.click(
+        fn=separate_audio,
+        inputs=extracted_audio,
+        outputs=[vocals_audio, background_audio, vocals_spectrogram, background_spectrogram]
+    )
 
     gr.Markdown("### Step 3: Perform Diarization")
     diarize_button = gr.Button("Perform Diarization")
@@ -272,31 +316,46 @@ with gr.Blocks() as demo:
     speakers_dropdown = gr.Dropdown(label="Speakers", choices=[], interactive=True)
     speaker_file_dropdown = gr.Dropdown(label="Segments / Concatenated", choices=[], interactive=True)
 
-    # Place metadata and audio side by side
     with gr.Row():
         metadata_display = gr.Textbox(label="Metadata JSON", lines=15, interactive=False)
         file_audio = gr.Audio(label="Audio Player", type="filepath", show_download_button=True, interactive=True)
 
-    diarize_button.click(perform_diarization,
-                         inputs=vocals_audio,
-                         outputs=[diar_json_display, speakers_dropdown])
+    diarize_button.click(
+        fn=perform_diarization,
+        inputs=vocals_audio,
+        outputs=[diar_json_display, speakers_dropdown]
+    )
 
-    # When speaker is selected, we populate the segments/concatenated
-    speakers_dropdown.change(update_speaker_files,
-                             inputs=speakers_dropdown,
-                             outputs=speaker_file_dropdown)
+    speakers_dropdown.change(
+        fn=update_speaker_files,
+        inputs=speakers_dropdown,
+        outputs=speaker_file_dropdown
+    )
 
-    # When segment or "concatenated" is selected, we display its metadata and audio
-    speaker_file_dropdown.change(display_speaker_file,
-                                 inputs=[speakers_dropdown, speaker_file_dropdown],
-                                 outputs=[metadata_display, file_audio])
+    speaker_file_dropdown.change(
+        fn=display_speaker_file,
+        inputs=[speakers_dropdown, speaker_file_dropdown],
+        outputs=[metadata_display, file_audio]
+    )
 
     # Button and textbox to confirm saving the JSON edits
     save_diar_button = gr.Button("Save Diarization Edits")
     save_status = gr.Textbox(label="Save Status", interactive=False)
 
-    save_diar_button.click(fn=save_diarization_data,
-                           inputs=[diar_json_display],
-                           outputs=[save_status])
+    save_diar_button.click(
+        fn=save_diarization_data,
+        inputs=[diar_json_display],
+        outputs=[save_status]
+    )
+
+    gr.Markdown("### Step 4: Translate Diarization JSON")
+    translate_button = gr.Button("Translate Diarization")
+    translated_json_display = gr.Textbox(label="Translated JSON", lines=15, interactive=False)
+
+    translate_button.click(
+        fn=translate_diar_json,
+        inputs=[],
+        outputs=[translated_json_display, file_audio]  
+    )
 
 demo.launch()
