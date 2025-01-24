@@ -219,8 +219,6 @@ def save_diarization_data(json_text):
         manager.preprocessor.diarization_data = new_data
         
         logger.info(f"Diarization JSON saved successfully at {diar_simple_path}!")
-        print(f"Diarization JSON saved successfully at {diar_simple_path}!")
-
         return f"Diarization JSON saved successfully at {diar_simple_path}!"
     except json.JSONDecodeError as e:
         return f"JSON parsing error: {str(e)}"
@@ -228,48 +226,43 @@ def save_diarization_data(json_text):
         return f"Error saving JSON: {str(e)}"
 
 
-def translate_diar_json(_):
+def translate_diar_json():
     """
-    1) Reads the diarization JSON from manager.diar_simple_path (includes any saved edits).
-    2) Uses the translator from tm.py to produce a translated JSON file next to the input video.
-    3) Returns the content of the translated file to display in Gradio.
+    Called when user clicks 'Translate Diarization'.
+    1) Reads diar_simple.json from manager.diar_simple_path (with any saved edits).
+    2) translator.translate_json(...) writes 'diarization_translated.json' beside diar_simple.json
+    3) Returns the new file's JSON content to display in Gradio.
     """
     try:
         diar_simple_path = manager.diar_simple_path
         if not diar_simple_path or not os.path.exists(diar_simple_path):
-            return "Error: diar_simple.json path not found. Please run diarization first.", None
+            return "Error: diar_simple.json path not found. Please run diarization first."
 
         # Load the current JSON from disk (with any saved edits)
         with open(diar_simple_path, "r", encoding="utf-8") as f:
             segments_data = json.load(f)
         if not isinstance(segments_data, list):
-            return "Error: diarization JSON is not a list of segments.", None
+            return "Error: diar_simple.json is not a list of segments."
 
-        # We need the original video path for translator to place the new file
-        input_video_path = manager.preprocessor.input_video
-        if not input_video_path:
-            return "Error: No input video path found in the manager.", None
-
-        # Call the translator. This method returns the path to the translated JSON
+        # Translate & get path to diarization_translated.json
         translated_file_path = translator.translate_json(
             segments=segments_data,
-            input_file_path=input_video_path,  # used to construct the final filename
-            target_language="French"  # or any other language from your config
+            diar_json_path=diar_simple_path,  # no video path used
+            target_language="French"
         )
 
         # Read back the translated JSON to show in a Gradio text box
         if not os.path.exists(translated_file_path):
-            return f"Error: Translated file not found at {translated_file_path}", None
+            return f"Error: Translated file not found at {translated_file_path}"
 
         with open(translated_file_path, "r", encoding="utf-8") as tf:
             translated_content = json.load(tf)
 
-        # Return the pretty JSON and a success message
-        return json.dumps(translated_content, indent=4), None
+        return json.dumps(translated_content, indent=4)
 
     except Exception as exc:
         logger.error(f"Error translating diarization JSON: {exc}")
-        return f"Error translating diarization JSON: {str(exc)}", None
+        return f"Error translating diarization JSON: {str(exc)}"
 
 
 ####################
@@ -354,8 +347,8 @@ with gr.Blocks() as demo:
 
     translate_button.click(
         fn=translate_diar_json,
-        inputs=[],
-        outputs=[translated_json_display, file_audio]  
+        inputs=None,
+        outputs=[translated_json_display]
     )
 
 demo.launch()
