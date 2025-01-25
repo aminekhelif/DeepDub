@@ -202,6 +202,7 @@ class DeepDubTranslator:
             "- Translate from the source language to the target language.\n"
             "- Preserve nuances, cultural references, wordplay, idiomatic expressions, etc.\n"
             "- Any symbols, measurement units, or numbers must be written out in words.\n"
+            "- Try to match the number of charachters between the original and the translated version (take note that the translating came from an audio transcription and the translation you give me back will be audio synthesized )\n"
         )
         chunk_json = json.dumps(chunk, ensure_ascii=False, indent=2)
         return f"{prompt_intro}\nHere is the chunk to translate:\n{chunk_json}\n"
