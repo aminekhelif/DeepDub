@@ -99,7 +99,7 @@ _f5_tts_service = _F5TTSService(_tts_cfg)
 logger.info("TTS service is ready.")
 
 
-def synthesize_translated_json(translated_json_path: str) -> str:
+def synthesize_translated_json(translated_json_path: str,temp_output_dir) -> str:
     """
     Public function: Reads the given 'translated' diarization JSON (which
     must have fields 'audio_path', 'text', 'translated_text', 'duration'),
@@ -121,14 +121,15 @@ def synthesize_translated_json(translated_json_path: str) -> str:
         logger.error(msg)
         return msg
 
-    tts_dir = "/tmp/deepdub_outputs/tts_output"
+    tts_dir = os.path.join(temp_output_dir,"tts_output")
     os.makedirs(tts_dir, exist_ok=True)
 
     for i, seg in enumerate(segments):
         ref_audio = seg.get("audio_path")
         ref_text = seg.get("text")
         new_text = seg.get("translated_text")
-        seg_dur  = seg.get("duration", 0.0)
+        seg_dur  = seg.get("duration", 0.3)
+        seg_dur = 0.3 if seg_dur < 0.3 else seg_dur
         if not ref_audio or not ref_text or not new_text:
             logger.warning(f"[TTS] Segment {i} missing fields, skipping.")
             continue
