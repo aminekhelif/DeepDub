@@ -6,6 +6,8 @@ import tempfile
 import json
 import soundfile as sf
 from DeepDub.logger import logger
+import shutil
+import tempfile
 
 from DeepDub.tm import translator
 from DeepDub.TTSService import synthesize_translated_json
@@ -15,8 +17,11 @@ with open('./DeepDub/config.yaml', 'r') as file:
     config = yaml.safe_load(file)
 
 # Define accessible temporary directory for outputs
-temp_output_dir = "/tmp/deepdub_outputs"
+temp_output_dir = "./tmp/deepdub_outputs"
 os.makedirs(temp_output_dir, exist_ok=True)
+os.environ["TMPDIR"] =temp_output_dir
+os.environ["GRADIO_TEMP_DIR"] = temp_output_dir
+tempfile.tempdir = temp_output_dir
 
 # Shared preprocessor instance
 class VideoProcessorManager:
@@ -95,6 +100,13 @@ def perform_diarization(input_audio):
     try:
         if not manager.preprocessor:
             manager.initialize()
+
+        # 1) Remove old diarization folder (if it exists)
+        diarization_dir = os.path.join(manager.preprocessor.base_output_dir, "diarization")
+        if os.path.exists(diarization_dir):
+            shutil.rmtree(diarization_dir)
+        os.makedirs(diarization_dir, exist_ok=True)
+
         if isinstance(input_audio, tuple):
             sampling_rate, audio_data = input_audio
             with tempfile.NamedTemporaryFile(suffix=".wav", delete=False, dir=temp_output_dir) as temp_audio_file:
@@ -304,7 +316,7 @@ def run_tts():
         return "Error: No valid 'diarization_translated.json' found. Please run translation first."
 
     # Call the TTS function from TTSService
-    result_str = synthesize_translated_json(translated_file)
+    result_str = synthesize_translated_json(translated_file,temp_output_dir)
     return result_str
 
 ####################
@@ -404,4 +416,4 @@ with gr.Blocks() as demo:
         outputs=[tts_result_display]
     )
 
-demo.launch()
+demo.launch(server_name="0.0.0.0", server_port=7860, share=False,allowed_paths=[temp_output_dir],root_path="/gpu14/user/amine/proxy/7860")
