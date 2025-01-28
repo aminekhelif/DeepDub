@@ -1,213 +1,449 @@
 import os
 import json
 import yaml
-from typing import List
-from pydantic import BaseModel, model_validator, ValidationError
+from typing import List, Optional
+from pydantic import BaseModel, model_validator
 from DeepDub.logger import logger
 
 from openai import OpenAI
+import argparse
+
+############################################################
+# 1) CONFIG AND CLIENT
+############################################################
 
 CONFIG_PATH = os.path.join(os.path.dirname(__file__), 'config.yaml')
 
-# -------------------- 1) Read Config & Initialize Client -------------------- #
-
 def _load_config(config_path: str) -> dict:
-    """Load YAML config (including OpenAI API key) from the given path."""
+    """Loads YAML config from disk (including openai_api_key)."""
     if not os.path.isfile(config_path):
-        raise FileNotFoundError(f"Config file not found at: {config_path}")
+        raise FileNotFoundError(f"Config file not found: {config_path}")
     with open(config_path, "r", encoding="utf-8") as f:
         return yaml.safe_load(f)
 
 _cfg = _load_config(CONFIG_PATH)
-_openai_api_key = _cfg.get("openai_api_key", None)
+_openai_api_key = _cfg.get("openai_api_key")
+_base_url = _cfg.get("base_url", 'https://api.openai.com/v1/')
 if not _openai_api_key:
-    raise ValueError("No 'openai_api_key' found in config. Please add it to config.yaml.")
+    raise ValueError("No 'openai_api_key' found in config.yaml.")
 
-# Initialize the OpenAI client ONCE at import time
-_client = OpenAI(api_key=_openai_api_key)
-logger.info("OpenAI client initialized with key from config.yaml.")
+_client = OpenAI(base_url=_base_url, api_key=_openai_api_key)
+logger.info("OpenAI client initialized from config.yaml.")
 
-# -------------------- 2) Pydantic Models for Structured Output -------------------- #
+############################################################
+# 2) Pydantic Models for LLM Output (index, text, translated_text)
+############################################################
 
-class TranslatedSegment(BaseModel):
+class IndexedTranslationItem(BaseModel):
     """
-    Represents a single segment with both original text and translated text.
-    If a field is missing/empty, we replace with defaults:
-      - start/end => 0.0
-      - text/speaker/translated_text => "Unknown"
+    The LLM must return exactly:
+      {
+        "index": <int>,
+        "text": <string>,
+        "translated_text": <string>
+      }
+
+    We'll only use 'index' to map back and 'translated_text' to store in final output.
+    The LLM's 'text' is just for alignment checking (to see that it hasn't dropped or reordered).
     """
 
-    start: float
-    end: float
+    index: int
     text: str
-    speaker: str
     translated_text: str
 
     @model_validator(mode="before")
     @classmethod
-    def fill_missing_fields(cls, values):
-        if "start" not in values or values["start"] is None:
-            values["start"] = 0.0
-        if "end" not in values or values["end"] is None:
-            values["end"] = 0.0
+    def fill_defaults(cls, values):
+        """
+        If the LLM fails to produce some fields properly,
+        we fall back so we never crash on parse.
+        """
+        # index fallback
+        idx = values.get("index")
+        if not isinstance(idx, int):
+            values["index"] = -1
 
-        for field_name in ["text", "speaker", "translated_text"]:
-            if field_name not in values or not str(values[field_name]).strip():
-                values[field_name] = "Unknown"
+        # text fallback
+        text_val = values.get("text")
+        if not text_val or not isinstance(text_val, str) or not text_val.strip():
+            values["text"] = "Unknown"
+
+        # translated_text fallback
+        tval = values.get("translated_text")
+        if not tval or not isinstance(tval, str) or not tval.strip():
+            values["translated_text"] = "Unknown"
+
         return values
 
 
-class TranslatedChunk(BaseModel):
+class IndexedTranslationList(BaseModel):
     """
-    A container representing a list of TranslatedSegment objects.
-    The LLM must return a JSON array, which we parse into `items`.
+    The final LLM output is a JSON array, each item -> IndexedTranslationItem.
+    We expect the length to match the input length exactly.
     """
-    items: List[TranslatedSegment]
+    items: List[IndexedTranslationItem]
 
-    def to_list(self) -> List[TranslatedSegment]:
+    def to_list(self) -> List[IndexedTranslationItem]:
         return self.items
 
-# -------------------- 3) The Translation Class -------------------- #
+############################################################
+# 3) DeepDubTranslator: robust chunking + fallback
+############################################################
 
 class DeepDubTranslator:
     """
-    A class providing chunk-wise translation of final JSON segments.
-    - Reuses a single, globally initialized OpenAI client.
-    - Saves output relative to the input file path.
+    This translator does the following:
+      1) Pre-process the 'segments' to ensure each has a unique 'index' and a valid 'text'.
+      2) Send them in chunks to the LLM, expecting an equal-length JSON array of items:
+         [ { "index": i, "text": "...", "translated_text": "..." }, ... ]
+      3) On parse or alignment failures, subdivide chunk or fall back.
+      4) Merge 'translated_text' back into final segments by matching the 'index'.
+      5) Write final JSON with the new 'translated_text' field.
     """
 
-    def __init__(self, client: OpenAI, default_model: str = "gpt-4o"):
-        """
-        Instantiate with an already-initialized OpenAI client and a default model name.
-        """
+    def __init__(self, client: OpenAI, default_model: str = "gpt-4", max_retries: int = 2):
         self._client = client
         self._default_model = default_model
-        logger.info("DeepDubTranslator is ready with model '%s'.", self._default_model)
+        self.max_retries = max_retries
+        logger.info("DeepDubTranslator using index approach. model='%s' max_retries=%d",
+                    default_model, max_retries)
 
     def translate_json(
         self,
         segments: List[dict],
         diar_json_path: str,
         target_language: str = "French",
-        model_name: str = None,
+        model_name: Optional[str] = None,
         chunk_size: int = 30
     ) -> str:
         """
-        Translate the final JSON segments, saving them to a path relative to 'input_file_path'.
-        Returns the path for pipeline continuity.
+        Main entry point:
+          1) Enforce each segment has {index, text}:
+             - If 'index' is missing, assign a unique integer.
+          2) Chunk them up to 'chunk_size'.
+          3) For each chunk, call LLM to get translations.
+          4) Merge into final list -> each has original fields + 'translated_text'.
+          5) Save final to 'diarization_translated.json' in same folder as diar_json_path.
+          6) Return that path.
+
+        The final output does NOT keep 'index' or any LLM-changed numeric fields.
         """
         if model_name is None:
             model_name = self._default_model
 
-        logger.info(
-            "Starting translation with model '%s', language '%s'. Segment count: %d",
-            model_name, target_language, len(segments)
-        )
+        self._assign_indexes_if_missing(segments)
 
-        # Build the system prompt
+        n = len(segments)
+        logger.info("Starting indexed translation: model='%s', language='%s', total_segments=%d",
+                    model_name, target_language, n)
+
+        base_dir = os.path.dirname(diar_json_path)
+        output_file = os.path.join(base_dir, "diarization_translated.json")
+
+        final_segments = [dict(seg) for seg in segments]
+
+        idx = 0
+        chunk_id = 1
+        while idx < n:
+            sub_data = final_segments[idx : idx + chunk_size]
+            logger.info("Translating chunk %d containing %d items...", chunk_id, len(sub_data))
+            chunk_id += 1
+
+            partial_result = self._translate_chunk_subdivide(sub_data, target_language, model_name)
+            for i, item in enumerate(partial_result):
+                global_i = idx + i
+                final_segments[global_i]["translated_text"] = item.translated_text
+
+            idx += chunk_size
+
+        for seg in final_segments:
+            if "index" in seg:
+                del seg["index"]
+
+        with open(output_file, "w", encoding="utf-8") as f:
+            json.dump(final_segments, f, indent=4, ensure_ascii=False)
+
+        logger.info("Translation complete. Wrote => %s", output_file)
+        return output_file
+
+    ########################################################
+    # 3.1) Pre-processing: Assign indexes if needed
+    ########################################################
+
+    def _assign_indexes_if_missing(self, segments: List[dict]):
+        """
+        Make sure each segment has a unique integer 'index'.
+        If any are missing or invalid, assign 0..n-1 in order.
+        """
+        for i, seg in enumerate(segments):
+            if "index" not in seg or not isinstance(seg["index"], int) or seg["index"] < 0:
+                seg["index"] = i
+            if "text" not in seg or not isinstance(seg["text"], str):
+                seg["text"] = ""
+
+    ########################################################
+    # 3.2) Subdividing approach with fallback
+    ########################################################
+
+    def _translate_chunk_subdivide(
+        self,
+        data: List[dict],
+        target_language: str,
+        model_name: str
+    ) -> List[IndexedTranslationItem]:
+        """
+        Translate a chunk of data => same length. If merges/drops => retry or subdivide.
+        """
+        size = len(data)
+        if size == 0:
+            return []
+
+        if size == 1:
+            return self._translate_single(data[0], target_language, model_name)
+
+        for attempt in range(self.max_retries + 1):
+            parsed_list = self._call_llm_parse(data, target_language, model_name)
+            if not parsed_list:
+                logger.warning("Chunk parse error for size=%d attempt=%d => fallback or subdiv",
+                               size, attempt+1)
+                if attempt == self.max_retries:
+                    return self._subdivide_and_combine(data, target_language, model_name)
+                else:
+                    continue
+
+            items = parsed_list.items
+            if len(items) != size:
+                logger.warning("LLM merged/dropped => got=%d, expected=%d attempt=%d => subdiv",
+                               len(items), size, attempt+1)
+                if attempt == self.max_retries:
+                    return self._subdivide_and_combine(data, target_language, model_name)
+                continue
+
+            if not self._validate_indexes(data, items):
+                logger.warning("LLM re-ordered or changed indexes. attempt=%d => subdiv",
+                               attempt+1)
+                if attempt == self.max_retries:
+                    return self._subdivide_and_combine(data, target_language, model_name)
+                continue
+
+            return items
+
+        return self._fallback_fill(data)
+
+    def _subdivide_and_combine(
+        self,
+        data: List[dict],
+        target_language: str,
+        model_name: str
+    ) -> List[IndexedTranslationItem]:
+        """
+        Subdivide a chunk into two halves, translate each half,
+        and combine the results. This helps if the LLM merges/drops items in bigger chunks.
+        """
+        size = len(data)
+        if size <= 1:
+            # Edge case: just translate single
+            return self._translate_single(data[0], target_language, model_name)
+
+        mid = size // 2
+        left = data[:mid]
+        right = data[mid:]
+        logger.info("Subdivide chunk => left=%d items, right=%d items", len(left), len(right))
+
+        L = self._translate_chunk_subdivide(left, target_language, model_name)
+        R = self._translate_chunk_subdivide(right, target_language, model_name)
+        return L + R
+
+    def _translate_single(
+        self,
+        seg: dict,
+        target_language: str,
+        model_name: str
+    ) -> List[IndexedTranslationItem]:
+        """
+        Try translating a single item multiple times. If it fails, fallback to "Unknown".
+        """
+        for attempt in range(self.max_retries + 1):
+            res_list = self._call_llm_parse([seg], target_language, model_name)
+            if res_list and len(res_list.items) == 1:
+                # (Optional) also check indexes match
+                if self._validate_indexes([seg], res_list.items):
+                    return res_list.items
+
+            logger.warning("Single item parse fail attempt=%d => fallback if last.", attempt+1)
+            if attempt == self.max_retries:
+                idx_val = seg.get("index", -1)
+                txt_val = seg.get("text", "Unknown")
+                return [IndexedTranslationItem(index=idx_val,
+                                               text=txt_val,
+                                               translated_text="Unknown")]
+
+        idx_val = seg.get("index", -1)
+        txt_val = seg.get("text", "Unknown")
+        return [IndexedTranslationItem(index=idx_val, text=txt_val, translated_text="Unknown")]
+
+    def _fallback_fill(self, data: List[dict]) -> List[IndexedTranslationItem]:
+        """
+        If chunk approach fails => produce a same-length array,
+        each with "Unknown" translation.
+        """
+        logger.warning("Fallback fill => size=%d => 'Unknown' translations", len(data))
+        items = []
+        for seg in data:
+            idx_val = seg.get("index", -1)
+            txt_val = seg.get("text", "Unknown")
+            items.append(IndexedTranslationItem(index=idx_val,
+                                                text=txt_val,
+                                                translated_text="Unknown"))
+        return items
+
+    ########################################################
+    # 3.3) LLM call => (index, text, translated_text)
+    ########################################################
+
+    def _call_llm_parse(
+        self,
+        data: List[dict],
+        target_language: str,
+        model_name: str
+    ) -> Optional[IndexedTranslationList]:
+        """
+        Instruct the LLM to produce a JSON array of the same length,
+        each item => { "index", "text", "translated_text" }.
+        We parse it with pydantic to ensure correctness.
+        """
         system_prompt = (
             "You are a highly skilled translator. "
-            "First, read the entire set of segments to fully grasp overall context. "
-            "Then, translate each segment's 'text' field into the target language while preserving context, "
-            "nuances, cultural references, wordplay, idiomatic expressions, acronyms, measurement units, slang, etc. "
-            "Make sure NOT to translate the names of people, companies, or brands. "
-            "Symbols, numbers, or measurement units must be written out in words in the target language "
-            "(e.g., '5 km' -> 'cinq kilomètres', '%' -> 'pour cent', '$' -> 'dollars')."
+            "We have a list of segments, each with an 'index' (integer) and 'text' (string). "
+            "First, read the entire list to fully understand the context. "
+            "For each segment:\n"
+            "- Keep the 'index' unchanged.\n"
+            "- Keep the 'text' **exactly** as given (do not modify the source text). \n"
+            "- Create or fill a 'translated_text' field with your translation into the target language.\n\n"
+
+            "Important:\n"
+            "- Preserve context, nuances, cultural references, wordplay, idiomatic expressions, acronyms, slang, etc.\n"
+            "- Do **not** translate any names of people, companies, or brands.\n"
+            "- All symbols, measurement units, or numbers must be spelled out in words in the target language "
+            "(e.g., '5 km' -> 'cinq kilomètres', '%' -> 'pour cent', '$' -> 'dollars').\n"
+            "- Try to keep the translation length close to the original text length (the output will be used for audio synthesis).\n"
+            "- **Do not** remove, merge, or reorder segments. The final output must have the exact same number of items, "
+            "with the same 'index' values in the same order.\n"
+            "- Return a valid JSON array of objects. Each object must have the fields:\n"
+            "    {\n"
+            "      \"index\": <same integer>,\n"
+            "      \"text\": <exact same text>,\n"
+            "      \"translated_text\": <your translation>\n"
+            "    }"
         )
-
-        # Create 'diarization_translated.json' next to diar_json_path
-        base_dir = os.path.dirname(diar_json_path)
-        output_file_path = os.path.join(base_dir, "diarization_translated.json")
-
-        all_segments = []
-        for i in range(0, len(segments), chunk_size):
-            chunk_data = segments[i : i + chunk_size]
-            logger.info("Translating chunk %d (size=%d)", (i // chunk_size) + 1, len(chunk_data))
-
-            translated_items = self._translate_chunk(
-                chunk_data,
-                model_name=model_name,
-                system_prompt=system_prompt,
-                target_language=target_language
-            )
-            # Convert Pydantic models to dict for JSON
-            all_segments.extend(item.dict() for item in translated_items)
-
-        # Save final JSON
-        with open(output_file_path, "w", encoding="utf-8") as f:
-            json.dump(all_segments, f, indent=4, ensure_ascii=False)
-
-        logger.info("Translation complete. File saved at: %s", output_file_path)
-        return output_file_path
-
-    # -------------------- Private Helper -------------------- #
-
-    def _translate_chunk(
-        self,
-        chunk: List[dict],
-        model_name: str,
-        system_prompt: str,
-        target_language: str
-    ) -> List[TranslatedSegment]:
-        """
-        Translate a single chunk of segments using the structured output approach:
-        self._client.beta.chat.completions.parse(...).
-        Returns a list of TranslatedSegment models.
-        """
-
-        user_message = self._build_user_prompt(chunk, target_language)
+        user_prompt = self._build_indexed_prompt(data, target_language)
 
         try:
             completion = self._client.beta.chat.completions.parse(
                 model=model_name,
                 messages=[
                     {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_message},
+                    {"role": "user", "content": user_prompt},
                 ],
-                temperature=0.2,
-                response_format=TranslatedChunk,
+                temperature=0.0,
+                response_format=IndexedTranslationList
             )
-
             choice = completion.choices[0].message
             if choice.refusal:
-                logger.error("LLM refused to respond for this chunk: %s", choice.refusal)
-                return []
+                logger.error("LLM refused the request. refusal msg: %s", choice.refusal)
+                return None
 
             chunk_obj = choice.parsed
-            if not chunk_obj or not isinstance(chunk_obj, TranslatedChunk):
-                logger.error("Unexpected format from LLM. Skipping chunk.")
-                return []
+            if not chunk_obj or not isinstance(chunk_obj, IndexedTranslationList):
+                logger.error("LLM output is not an IndexedTranslationList.")
+                return None
 
-            return chunk_obj.to_list()
+            return chunk_obj
 
-        except ValidationError as ve:
-            logger.error("Validation error in chunk translation: %s", ve)
-            return []
         except Exception as e:
-            logger.error("OpenAI API error for chunk: %s", e)
-            return []
+            logger.error("Error calling LLM parse: %s", e)
+            return None
 
-    def _build_user_prompt(self, chunk: List[dict], target_language: str) -> str:
+    def _build_indexed_prompt(self,data: List[dict], target_language: str) -> str:
         """
-        Construct the user-facing prompt for a chunk of segments.
+        Build the user-level prompt that enumerates each segment's index => text,
+        asking the model to produce the final JSON array with 'index', 'text', and 'translated_text'.
         """
-        prompt_intro = (
-            "Below is a list of segments in JSON format. "
-            "For each segment:\n"
-            "- Do NOT modify the 'text' field (it must remain in the source language).\n"
-            f"- Create or fill 'translated_text' with the translation into {target_language}.\n\n"
-            "Return a valid JSON array of objects, where each object preserves the original fields "
-            "(start, end, text, speaker) and includes a new field 'translated_text'.\n\n"
-            "Important:\n"
-            "- Translate from the source language to the target language.\n"
-            "- Preserve nuances, cultural references, wordplay, idiomatic expressions, etc.\n"
-            "- Any symbols, measurement units, or numbers must be written out in words.\n"
-            "- Try to match the number of charachters between the original and the translated version (take note that the translating came from an audio transcription and the translation you give me back will be audio synthesized )\n"
+
+        lines = []
+        for seg in data:
+            idx_val = seg.get("index", -1)
+            txt_val = seg.get("text", "Unknown").replace("\n", " ")
+            lines.append(f"{idx_val} => {txt_val}")
+
+        prompt = (
+            f"Below are {len(data)} segments. Please translate each segment's 'text' into {target_language}.\n"
+            "Remember:\n"
+            "- Keep the same 'index' integer.\n"
+            "- Do **not** modify the 'text' field.\n"
+            "- Add a 'translated_text' field with the appropriate translation.\n\n"
+            "Return a **JSON array** of exactly the same length, each item in the form:\n"
+            "{\n"
+            "  \"index\": <same integer>,\n"
+            "  \"text\": <same original text>,\n"
+            "  \"translated_text\": <your translation>\n"
+            "}\n\n"
+            "Here are the segments (index => text):\n"
         )
-        chunk_json = json.dumps(chunk, ensure_ascii=False, indent=2)
-        return f"{prompt_intro}\nHere is the chunk to translate:\n{chunk_json}\n"
+        prompt += "\n".join(lines)
+        return prompt
 
-# -------------------- 4) Create the Shared Translator at Import -------------------- #
+    def _validate_indexes(self, original_data: List[dict], llm_items: List[IndexedTranslationItem]) -> bool:
+        """
+        Optional check: ensure the LLM's returned indexes match one-to-one 
+        with our original list order. If there's a mismatch, we consider that a parse failure.
+        """
+        for orig, llm_item in zip(original_data, llm_items):
+            if orig["index"] != llm_item.index:
+                logger.warning("Mismatch index: original=%d vs llm=%d, text=%s",
+                               orig["index"], llm_item.index, llm_item.text)
+                return False
+        return True
 
-translator = DeepDubTranslator(client=_client, default_model="gpt-4o")
-logger.info("Global 'translator' instance is ready for use.")
+############################################################
+# 4) GLOBAL TRANSLATOR INSTANCE
+############################################################
+
+translator = DeepDubTranslator(
+    client=_client,
+    default_model="gpt-4",
+    max_retries=2
+)
+logger.info("Global 'translator' (index-based) is ready.")
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="CLI for segment-based translation.")
+    parser.add_argument("--input", required=True,
+                        help="Path to a JSON containing segments with optional index/text.")
+    parser.add_argument("--output", help="Path to diar_simple.json (for directory reference).",
+                        default=None)
+    parser.add_argument("--target", help="Target language", default="French")
+    parser.add_argument("--chunk-size", type=int, default=30)
+    parser.add_argument("--model", default="gpt-4", help="Model name.")
+    args = parser.parse_args()
+
+    with open(args.input, "r", encoding="utf-8") as fin:
+        segments_data = json.load(fin)
+
+    if not isinstance(segments_data, list):
+        raise ValueError(f"Input JSON must be a list, got {type(segments_data)}")
+
+    if not args.output:
+        diar_json_path = os.path.abspath(args.input)
+    else:
+        diar_json_path = os.path.abspath(args.output)
+
+    final_path = translator.translate_json(
+        segments=segments_data,
+        diar_json_path=diar_json_path,
+        target_language=args.target,
+        model_name=args.model,
+        chunk_size=args.chunk_size
+    )
+
+    print(f"CLI translation done. Output => {final_path}")
