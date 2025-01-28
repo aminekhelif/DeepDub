@@ -81,6 +81,7 @@ class _F5TTSService:
         os.makedirs(os.path.dirname(output_wav), exist_ok=True)
         sf.write(output_wav, audio_segment, final_sr, format="WAV")
         duration = len(audio_segment) / final_sr
+        duration += 0.8
         logger.info(f"[TTS] Output => {output_wav} (duration={duration:.2f}s)")
 
         if remove_silence:
@@ -123,7 +124,7 @@ def synthesize_translated_json(translated_json_path: str,temp_output_dir) -> str
         ref_audio = seg.get("audio_path")
         ref_text = seg.get("text")
         new_text = seg.get("translated_text")
-        seg_dur  = seg.get("duration", 0.3)
+        seg_dur  = seg.get("duration", 1)
         seg_dur = 0.3 if seg_dur < 0.3 else seg_dur
         if not ref_audio or not ref_text or not new_text:
             logger.warning(f"[TTS] Segment {i} missing fields, skipping.")
