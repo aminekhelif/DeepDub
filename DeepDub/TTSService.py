@@ -1,5 +1,3 @@
-# DeepDub/TTSService.py
-
 import os
 import json
 import yaml
@@ -7,13 +5,11 @@ import soundfile as sf
 from omegaconf import OmegaConf
 from loguru import logger
 
-# F5-TTS imports
 from f5_tts.infer.utils_infer import (
     load_model, infer_process, preprocess_ref_audio_text, load_vocoder,
 )
 from f5_tts.model import DiT
 
-# 1) Load the main config.yaml
 CONFIG_PATH = os.path.join(os.path.dirname(__file__), "config.yaml")
 with open(CONFIG_PATH, "r", encoding="utf-8") as cf:
     _config = yaml.safe_load(cf)
@@ -34,11 +30,9 @@ class _F5TTSService:
         self.nfe_step = cfg.get("nfe_step", 32)
         self.vocoder_name = cfg.get("vocoder_name", "vocos")
 
-        # 1) Load vocoder
         vocoder_local = cfg.get("load_vocoder_from_local", False)
         self.vocoder = _load_vocoder_cli_style(self.vocoder_name, vocoder_local)
 
-        # 2) Load F5-TTS model
         ckpt_file = cfg["ckpt_file"]
         vocab_file = cfg["vocab_file"]
         model_cfg_path = cfg["model_cfg_path"]
@@ -62,7 +56,7 @@ class _F5TTSService:
         gen_text: str,
         output_wav: str,
         fix_duration: float,
-        remove_silence: bool = False
+        remove_silence: bool = True
     ) -> float:
         """
         Generates speech matching fix_duration. Returns the wave length (sec).
@@ -79,6 +73,8 @@ class _F5TTSService:
             mel_spec_type=self.vocoder_name,
             nfe_step=self.nfe_step,
             fix_duration=fix_duration,
+            target_rms= 0.01,
+            cfg_strength=1,
             device=self.device,
         )
 
@@ -93,7 +89,6 @@ class _F5TTSService:
 
         return duration
 
-# Create one global TTS service at import
 logger.info("Initializing global TTS service...")
 _f5_tts_service = _F5TTSService(_tts_cfg)
 logger.info("TTS service is ready.")
@@ -152,7 +147,6 @@ def synthesize_translated_json(translated_json_path: str,temp_output_dir) -> str
             logger.error(f"[TTS] Segment {i} error: {e}")
             seg["tts"] = {"error": str(e)}
 
-    # Save an updated file
     out_json = os.path.splitext(translated_json_path)[0] + "_tts.json"
     with open(out_json, "w", encoding="utf-8") as wf:
         json.dump(segments, wf, indent=4, ensure_ascii=False)

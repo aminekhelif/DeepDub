@@ -34,13 +34,8 @@ class AudioSeparator:
             "Mel-RoFormer": "model_mel_band_roformer_ep_3005_sdr_11.4360.ckpt",
         }
 
-        # Define available models
         self.available_models = list(self.model_paths.keys())
-
-        # Initialize separators dictionary
         self.separators = {}
-
-        # Set and load the initial model
         self.model = model
 
     @property

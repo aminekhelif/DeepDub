@@ -9,28 +9,27 @@ from DeepDub.logger import logger
 import shutil
 import tempfile
 
+from pydub import AudioSegment
+from moviepy.editor import VideoFileClip, AudioFileClip
+
 from DeepDub.tm import translator
 from DeepDub.TTSService import synthesize_translated_json
 
-# Load configuration
 with open('./DeepDub/config.yaml', 'r') as file:
     config = yaml.safe_load(file)
 
-# Define accessible temporary directory for outputs
 temp_output_dir = "./tmp/deepdub_outputs"
 os.makedirs(temp_output_dir, exist_ok=True)
-os.environ["TMPDIR"] =temp_output_dir
 os.environ["GRADIO_TEMP_DIR"] = temp_output_dir
 tempfile.tempdir = temp_output_dir
 
-# Shared preprocessor instance
 class VideoProcessorManager:
     def __init__(self):
         self.preprocessor = None
         self.step_results = {}
         self.speaker_audio_structure = {}
         self.diar_simple_path = None
-        self.translated_file_path = None  # We'll store the path to the final translated JSON here.
+        self.translated_file_path = None 
 
     def initialize(self, input_video=None):
         output_dir = os.path.join(temp_output_dir, "separation_output")
@@ -56,7 +55,6 @@ def update_step_results(step, **results):
     for key, value in results.items():
         logger.info(f"{step} result - {key}: {value}")
 
-# Step 1: Split Audio and Video
 def split_audio_video(input_video):
     try:
         if not manager.preprocessor or (manager.preprocessor.input_video and manager.preprocessor.input_video != os.path.abspath(input_video)):
@@ -72,14 +70,18 @@ def separate_audio(input_audio):
     try:
         if not manager.preprocessor:
             manager.initialize()
+
         if isinstance(input_audio, tuple):
             sampling_rate, audio_data = input_audio
             with tempfile.NamedTemporaryFile(suffix=".wav", delete=False, dir=temp_output_dir) as temp_audio_file:
                 sf.write(temp_audio_file.name, audio_data, sampling_rate)
                 input_audio = temp_audio_file.name
+
         manager.preprocessor.extracted_audio_path = input_audio
+
         vocals_path, background_path = manager.preprocessor.separate_audio()
         separator = manager.preprocessor.audio_separator
+
         vocals_spectrogram_path = os.path.join(manager.preprocessor.base_output_dir, "vocals_spectrogram.png")
         background_spectrogram_path = os.path.join(manager.preprocessor.base_output_dir, "background_spectrogram.png")
         separator.save_spectrogram(vocals_path, vocals_spectrogram_path)
@@ -90,18 +92,17 @@ def separate_audio(input_audio):
                             background_path=background_path,
                             vocals_spectrogram_path=vocals_spectrogram_path,
                             background_spectrogram_path=background_spectrogram_path)
+
         return vocals_path, background_path, vocals_spectrogram_path, background_spectrogram_path
     except Exception as e:
         logger.error(f"Error separating audio: {e}")
         return f"Error: {e}", None, None, None
 
-# Step 3: Perform Diarization
 def perform_diarization(input_audio):
     try:
         if not manager.preprocessor:
             manager.initialize()
 
-        # 1) Remove old diarization folder (if it exists)
         diarization_dir = os.path.join(manager.preprocessor.base_output_dir, "diarization")
         if os.path.exists(diarization_dir):
             shutil.rmtree(diarization_dir)
@@ -112,6 +113,7 @@ def perform_diarization(input_audio):
             with tempfile.NamedTemporaryFile(suffix=".wav", delete=False, dir=temp_output_dir) as temp_audio_file:
                 sf.write(temp_audio_file.name, audio_data, sampling_rate)
                 input_audio = temp_audio_file.name
+
         manager.preprocessor.vocals_path = input_audio
         diarization_data = manager.preprocessor.perform_diarization()
 
@@ -127,7 +129,6 @@ def perform_diarization(input_audio):
                             files_list=[])
 
         diar_json_content = load_json_file(diar_simple_path)
-        # Return the diar_json_content and update the speakers dropdown choices
         return diar_json_content, gr.update(choices=list(manager.speaker_audio_structure.keys()))
     except Exception as e:
         logger.error(f"Error performing diarization: {e}")
@@ -240,7 +241,6 @@ def save_diarization_data(json_text):
     except Exception as e:
         return f"Error saving JSON: {str(e)}"
 
-
 def translate_diar_json():
     """
     Called when user clicks 'Translate Diarization'.
@@ -253,20 +253,17 @@ def translate_diar_json():
         if not diar_simple_path or not os.path.exists(diar_simple_path):
             return "Error: diar_simple.json path not found. Please run diarization first."
 
-        # Load the current JSON from disk (with any saved edits)
         with open(diar_simple_path, "r", encoding="utf-8") as f:
             segments_data = json.load(f)
         if not isinstance(segments_data, list):
             return "Error: diar_simple.json is not a list of segments."
 
-        # Translate & get path to diarization_translated.json
         translated_file_path = translator.translate_json(
             segments=segments_data,
             diar_json_path=diar_simple_path,
             target_language="French"
         )
 
-        # Store this path for the TTS step
         manager.translated_file_path = translated_file_path
 
         if not os.path.exists(translated_file_path):
@@ -275,14 +272,14 @@ def translate_diar_json():
         with open(translated_file_path, "r", encoding="utf-8") as tf:
             translated_content = json.load(tf)
 
-       
         diarization_dir = os.path.dirname(translated_file_path)
         speaker_audio_dir = os.path.join(diarization_dir, "speaker_audio")
 
         for i, seg in enumerate(translated_content):
             start_time = seg.get("start", 0)
             end_time = seg.get("end", 0)
-            seg["duration"] = round(end_time - start_time, 0)
+            diff = end_time - start_time if (end_time is not None and start_time is not None) else 1
+            seg["duration"] = diff
             speaker_name = seg.get("speaker", "Unknown")
 
             seg["audio_path"] = os.path.join(
@@ -301,9 +298,7 @@ def translate_diar_json():
         logger.error(f"Error translating diarization JSON: {exc}")
         return f"Error translating diarization JSON: {str(exc)}"
 
-# ---------------------------
-# STEP 5: TTS Synthesis
-# ---------------------------
+
 def run_tts():
     """
     Gradio callback for the "Synthesize TTS" button.
@@ -315,12 +310,88 @@ def run_tts():
     if not translated_file or not os.path.exists(translated_file):
         return "Error: No valid 'diarization_translated.json' found. Please run translation first."
 
-    # Call the TTS function from TTSService
-    result_str = synthesize_translated_json(translated_file,temp_output_dir)
+    result_str = synthesize_translated_json(translated_file, temp_output_dir)
+
     return result_str
 
+
+def merge_tts_and_finalize():
+    """
+    1) Load the final TTS JSON (the same JSON path stored in manager.translated_file_path).
+    2) Load the background track (from manager.step_results).
+    3) Overlay each TTS snippet onto the background track at the correct start time.
+    4) Export the final combined audio.
+    5) Merge that combined audio with the muted video.
+    6) Return the path to the final video for Gradio to display.
+    """
+
+    tts_json_path = manager.translated_file_path
+    if not tts_json_path or not os.path.exists(tts_json_path):
+        return "Error: No TTS JSON found. Please run translation & TTS first."
+
+    background_path = manager.step_results.get("separate", {}).get("background_path", None)
+    if not background_path or not os.path.exists(background_path):
+        return "Error: No background audio found. Please run audio separation first."
+
+    video_no_audio_path = manager.step_results.get("split", {}).get("video_no_audio_path", None)
+    if not video_no_audio_path or not os.path.exists(video_no_audio_path):
+        return "Error: No video-without-audio found. Please run Step 1 first."
+
+    output_dir = temp_output_dir
+    final_audio_path = os.path.join(output_dir, "final_combined_audio.wav")
+    final_video_path = os.path.join(output_dir, "final_output_video.mp4")
+
+    with open(tts_json_path, "r", encoding="utf-8") as f:
+        segments_data = json.load(f)
+
+    if not isinstance(segments_data, list):
+        return "Error: TTS JSON content is not a list."
+
+    total_duration_sec = 0.0
+    for seg in segments_data:
+        if seg.get("end", 0) > total_duration_sec:
+            total_duration_sec = seg["end"]
+
+    background_audio = AudioSegment.from_file(background_path)
+    background_duration_sec = len(background_audio) / 1000.0
+
+    if total_duration_sec > background_duration_sec:
+        needed_ms = (total_duration_sec - background_duration_sec) * 1000
+        background_audio = background_audio + AudioSegment.silent(duration=needed_ms)
+
+    final_audio = background_audio
+    for idx, seg in enumerate(segments_data):
+        tts_info = seg.get("tts", {})
+        tts_audio_path = tts_info.get("audio_path", None)
+        start_time_sec = seg.get("start", 0)
+
+        if not tts_audio_path or not os.path.exists(tts_audio_path):
+            logger.warning(f"Warning: TTS audio missing for segment {idx}")
+            continue
+
+        snippet = AudioSegment.from_file(tts_audio_path)
+
+        start_time_ms = int(start_time_sec * 1000)
+        final_audio = final_audio.overlay(snippet, position=start_time_ms)
+
+    final_audio.export(final_audio_path, format="wav")
+    logger.info(f"Final combined audio saved at {final_audio_path}")
+
+    video_clip = VideoFileClip(video_no_audio_path)
+    audio_clip = AudioFileClip(final_audio_path)
+
+    final_audio_clip = audio_clip.set_duration(video_clip.duration)
+
+    final_clip = video_clip.set_audio(final_audio_clip)
+    final_clip.write_videofile(final_video_path, codec="libx264", audio_codec="aac")
+    final_clip.close()
+
+    logger.info(f"Final video with audio saved at {final_video_path}")
+
+    return final_video_path
+
 ####################
-#   BUILD THE UI
+#       UI
 ####################
 
 with gr.Blocks() as demo:
@@ -357,7 +428,6 @@ with gr.Blocks() as demo:
     gr.Markdown("### Step 3: Perform Diarization")
     diarize_button = gr.Button("Perform Diarization")
 
-    # This Textbox shows and allows editing of diar_simple.json
     diar_json_display = gr.Textbox(label="diar_simple.json Content", lines=15, interactive=True)
 
     speakers_dropdown = gr.Dropdown(label="Speakers", choices=[], interactive=True)
@@ -385,7 +455,6 @@ with gr.Blocks() as demo:
         outputs=[metadata_display, file_audio]
     )
 
-    # Button and textbox to confirm saving the JSON edits
     save_diar_button = gr.Button("Save Diarization Edits")
     save_status = gr.Textbox(label="Save Status", interactive=False)
 
@@ -405,7 +474,6 @@ with gr.Blocks() as demo:
         outputs=[translated_json_display]
     )
 
-    # Step 5
     gr.Markdown("### Step 5: TTS Synthesis")
     tts_button = gr.Button("Synthesize TTS")
     tts_result_display = gr.Textbox(label="Synthesized JSON", lines=15, interactive=False)
@@ -416,4 +484,20 @@ with gr.Blocks() as demo:
         outputs=[tts_result_display]
     )
 
-demo.launch(server_name="0.0.0.0", server_port=7860, share=False,allowed_paths=[temp_output_dir],root_path="/gpu14/user/amine/proxy/7860")
+    gr.Markdown("### Step 6: Merge TTS + Background and Finalize Video")
+    merge_button = gr.Button("Merge & Finalize")
+    final_video_out = gr.Video(label="Final Video (with Audio)", height=300)
+
+    merge_button.click(
+        fn=merge_tts_and_finalize,
+        inputs=[],
+        outputs=[final_video_out]
+    )
+
+demo.launch(
+    server_name="0.0.0.0",
+    server_port=7860,
+    share=False,
+    allowed_paths=[temp_output_dir],
+    root_path="/gpu14/user/amine/proxy/7860"
+)

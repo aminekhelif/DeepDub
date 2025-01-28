@@ -15,6 +15,5 @@ def setup_logger(config_path):
     logger = logging.getLogger(__name__)
     return logger
 
-# actual loggeer path 
 config_path = os.path.join(os.path.dirname(__file__), 'config.yaml')
 logger = setup_logger(config_path)

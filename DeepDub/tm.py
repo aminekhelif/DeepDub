@@ -2,15 +2,12 @@ import os
 import json
 import yaml
 from typing import List, Optional
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel
 from DeepDub.logger import logger
 
 from openai import OpenAI
 import argparse
 
-############################################################
-# 1) CONFIG AND CLIENT
-############################################################
 
 CONFIG_PATH = os.path.join(os.path.dirname(__file__), 'config.yaml')
 
@@ -30,10 +27,6 @@ if not _openai_api_key:
 _client = OpenAI(base_url=_base_url, api_key=_openai_api_key)
 logger.info("OpenAI client initialized from config.yaml.")
 
-############################################################
-# 2) Pydantic Models for LLM Output (index, text, translated_text)
-############################################################
-
 class IndexedTranslationItem(BaseModel):
     """
     The LLM must return exactly:
@@ -51,30 +44,6 @@ class IndexedTranslationItem(BaseModel):
     text: str
     translated_text: str
 
-    @model_validator(mode="before")
-    @classmethod
-    def fill_defaults(cls, values):
-        """
-        If the LLM fails to produce some fields properly,
-        we fall back so we never crash on parse.
-        """
-        # index fallback
-        idx = values.get("index")
-        if not isinstance(idx, int):
-            values["index"] = -1
-
-        # text fallback
-        text_val = values.get("text")
-        if not text_val or not isinstance(text_val, str) or not text_val.strip():
-            values["text"] = "Unknown"
-
-        # translated_text fallback
-        tval = values.get("translated_text")
-        if not tval or not isinstance(tval, str) or not tval.strip():
-            values["translated_text"] = "Unknown"
-
-        return values
-
 
 class IndexedTranslationList(BaseModel):
     """
@@ -85,10 +54,6 @@ class IndexedTranslationList(BaseModel):
 
     def to_list(self) -> List[IndexedTranslationItem]:
         return self.items
-
-############################################################
-# 3) DeepDubTranslator: robust chunking + fallback
-############################################################
 
 class DeepDubTranslator:
     """
@@ -101,7 +66,7 @@ class DeepDubTranslator:
       5) Write final JSON with the new 'translated_text' field.
     """
 
-    def __init__(self, client: OpenAI, default_model: str = "gpt-4", max_retries: int = 2):
+    def __init__(self, client: OpenAI, default_model: str = "gpt-4o", max_retries: int = 2):
         self._client = client
         self._default_model = default_model
         self.max_retries = max_retries
@@ -114,7 +79,7 @@ class DeepDubTranslator:
         diar_json_path: str,
         target_language: str = "French",
         model_name: Optional[str] = None,
-        chunk_size: int = 30
+        chunk_size: int =40
     ) -> str:
         """
         Main entry point:
@@ -167,7 +132,7 @@ class DeepDubTranslator:
         return output_file
 
     ########################################################
-    # 3.1) Pre-processing: Assign indexes if needed
+    #  Pre-processing: Assign indexes if needed
     ########################################################
 
     def _assign_indexes_if_missing(self, segments: List[dict]):
@@ -182,7 +147,7 @@ class DeepDubTranslator:
                 seg["text"] = ""
 
     ########################################################
-    # 3.2) Subdividing approach with fallback
+    #  Subdividing approach with fallback
     ########################################################
 
     def _translate_chunk_subdivide(
@@ -273,32 +238,29 @@ class DeepDubTranslator:
             logger.warning("Single item parse fail attempt=%d => fallback if last.", attempt+1)
             if attempt == self.max_retries:
                 idx_val = seg.get("index", -1)
-                txt_val = seg.get("text", "Unknown")
+                txt_val = seg.get("text", "")
                 return [IndexedTranslationItem(index=idx_val,
                                                text=txt_val,
-                                               translated_text="Unknown")]
+                                               translated_text="")]
 
         idx_val = seg.get("index", -1)
-        txt_val = seg.get("text", "Unknown")
-        return [IndexedTranslationItem(index=idx_val, text=txt_val, translated_text="Unknown")]
+        txt_val = seg.get("text", "")
+        return [IndexedTranslationItem(index=idx_val, text=txt_val, translated_text="")]
 
     def _fallback_fill(self, data: List[dict]) -> List[IndexedTranslationItem]:
-        """
-        If chunk approach fails => produce a same-length array,
-        each with "Unknown" translation.
-        """
+
         logger.warning("Fallback fill => size=%d => 'Unknown' translations", len(data))
         items = []
         for seg in data:
             idx_val = seg.get("index", -1)
-            txt_val = seg.get("text", "Unknown")
+            txt_val = seg.get("text", "")
             items.append(IndexedTranslationItem(index=idx_val,
                                                 text=txt_val,
-                                                translated_text="Unknown"))
+                                                translated_text=""))
         return items
 
     ########################################################
-    # 3.3) LLM call => (index, text, translated_text)
+    # LLM call => (index, text, translated_text)
     ########################################################
 
     def _call_llm_parse(
@@ -373,7 +335,7 @@ class DeepDubTranslator:
         lines = []
         for seg in data:
             idx_val = seg.get("index", -1)
-            txt_val = seg.get("text", "Unknown").replace("\n", " ")
+            txt_val = seg.get("text", "").replace("\n", " ")
             lines.append(f"{idx_val} => {txt_val}")
 
         prompt = (
@@ -406,12 +368,12 @@ class DeepDubTranslator:
         return True
 
 ############################################################
-# 4) GLOBAL TRANSLATOR INSTANCE
+#  GLOBAL TRANSLATOR INSTANCE
 ############################################################
 
 translator = DeepDubTranslator(
     client=_client,
-    default_model="gpt-4",
+    default_model="gpt-4o",
     max_retries=2
 )
 logger.info("Global 'translator' (index-based) is ready.")
@@ -423,7 +385,7 @@ if __name__ == "__main__":
     parser.add_argument("--output", help="Path to diar_simple.json (for directory reference).",
                         default=None)
     parser.add_argument("--target", help="Target language", default="French")
-    parser.add_argument("--chunk-size", type=int, default=30)
+    parser.add_argument("--chunk-size", type=int, default=40)
     parser.add_argument("--model", default="gpt-4", help="Model name.")
     args = parser.parse_args()
 

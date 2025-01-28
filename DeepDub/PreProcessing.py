@@ -60,7 +60,6 @@ class Preprocessing:
             raise ValueError("No valid input video provided.")
         logger.info(f"Splitting audio and video for: {self.input_video}")
         
-        # Use VideoProcessor to split audio and video
         processor = VideoProcessor(self.input_video)
         self.extracted_audio_path, self.video_no_audio_path = processor.split_audio_video()
         if self.extracted_audio_path:
@@ -90,7 +89,6 @@ class Preprocessing:
         logger.info(f"Separating audio: {self.extracted_audio_path}")
         vocals_path, background_path = self.audio_separator.separate(self.extracted_audio_path)
 
-        # Ensure paths are within base_output_dir
         new_vocals_path = os.path.join(self.base_output_dir, "vocals.mp3")
         new_background_path = os.path.join(self.base_output_dir, "instrumental.mp3")
 
