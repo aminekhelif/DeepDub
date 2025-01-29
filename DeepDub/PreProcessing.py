@@ -9,7 +9,7 @@ from DeepDub.logger import logger
 class Preprocessing:
     def __init__(self, input_video=None, output_dir=None, 
                  audio_separator_model="Mel-RoFormer", 
-                 diarization_batch_size=16, device="cpu", compute_type="int8", HF_token=None,num_speakers=None,language=None,device_index=0):
+                 diarization_batch_size=16, device="cpu", compute_type="int8", HF_token=None,num_speakers=None,language='en',device_index=0):
         """
         Initializes the Preprocessing class.
         

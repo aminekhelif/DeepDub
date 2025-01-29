@@ -10,7 +10,7 @@ from whisperX import whisperx
 from DeepDub.logger import logger
 
 class AudioDiarization:
-    def __init__(self, audio_path, diarization_dir=None, batch_size=16, device="cpu", compute_type="int8", HF_token=None, model_size="large-v3",num_speakers=None,language=None,device_index=0):
+    def __init__(self, audio_path, diarization_dir=None, batch_size=16, device="cpu", compute_type="int8", HF_token=None, model_size="large-v3",num_speakers=None,language='en',device_index=0):
         if not audio_path or not os.path.exists(audio_path):
             raise ValueError(f"Invalid audio_path for diarization: {audio_path}")
         self.audio_path = os.path.abspath(audio_path)

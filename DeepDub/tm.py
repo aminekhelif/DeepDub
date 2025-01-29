@@ -8,7 +8,6 @@ from DeepDub.logger import logger
 from openai import OpenAI
 import argparse
 
-
 CONFIG_PATH = os.path.join(os.path.dirname(__file__), 'config.yaml')
 
 def _load_config(config_path: str) -> dict:
@@ -158,6 +157,7 @@ class DeepDubTranslator:
     ) -> List[IndexedTranslationItem]:
         """
         Translate a chunk of data => same length. If merges/drops => retry or subdivide.
+        ALSO: If any 'translated_text' is empty, treat it like a parse failure => retry or subdivide.
         """
         size = len(data)
         if size == 0:
@@ -170,13 +170,15 @@ class DeepDubTranslator:
             parsed_list = self._call_llm_parse(data, target_language, model_name)
             if not parsed_list:
                 logger.warning("Chunk parse error for size=%d attempt=%d => fallback or subdiv",
-                               size, attempt+1)
+                               size, attempt + 1)
                 if attempt == self.max_retries:
                     return self._subdivide_and_combine(data, target_language, model_name)
                 else:
                     continue
 
             items = parsed_list.items
+
+            # 1) Check length
             if len(items) != size:
                 logger.warning("LLM merged/dropped => got=%d, expected=%d attempt=%d => subdiv",
                                len(items), size, attempt+1)
@@ -184,6 +186,7 @@ class DeepDubTranslator:
                     return self._subdivide_and_combine(data, target_language, model_name)
                 continue
 
+            # 2) Check indexes
             if not self._validate_indexes(data, items):
                 logger.warning("LLM re-ordered or changed indexes. attempt=%d => subdiv",
                                attempt+1)
@@ -191,8 +194,19 @@ class DeepDubTranslator:
                     return self._subdivide_and_combine(data, target_language, model_name)
                 continue
 
+            # 3) Check for empty translated_text
+            if any(not (itm.translated_text and itm.translated_text.strip()) for itm in items):
+                logger.warning("LLM returned at least one empty 'translated_text'. attempt=%d => subdiv",
+                               attempt+1)
+                if attempt == self.max_retries:
+                    return self._subdivide_and_combine(data, target_language, model_name)
+                else:
+                    continue
+
+            # If all checks passed, return items
             return items
 
+        # If all attempts fail, fallback
         return self._fallback_fill(data)
 
     def _subdivide_and_combine(
@@ -203,7 +217,7 @@ class DeepDubTranslator:
     ) -> List[IndexedTranslationItem]:
         """
         Subdivide a chunk into two halves, translate each half,
-        and combine the results. This helps if the LLM merges/drops items in bigger chunks.
+        and combine the results. This helps if the LLM merges/drops items or returns empties.
         """
         size = len(data)
         if size <= 1:
@@ -226,16 +240,20 @@ class DeepDubTranslator:
         model_name: str
     ) -> List[IndexedTranslationItem]:
         """
-        Try translating a single item multiple times. If it fails, fallback to "Unknown".
+        Try translating a single item multiple times. If it fails or returns empty, fallback.
         """
         for attempt in range(self.max_retries + 1):
             res_list = self._call_llm_parse([seg], target_language, model_name)
             if res_list and len(res_list.items) == 1:
-                # (Optional) also check indexes match
-                if self._validate_indexes([seg], res_list.items):
-                    return res_list.items
+                item = res_list.items[0]
+                # Check index match
+                if self._validate_indexes([seg], [item]):
+                    # Check for non-empty translation
+                    if item.translated_text and item.translated_text.strip():
+                        return res_list.items
 
-            logger.warning("Single item parse fail attempt=%d => fallback if last.", attempt+1)
+            logger.warning("Single item parse fail or empty text attempt=%d => fallback if last.",
+                           attempt+1)
             if attempt == self.max_retries:
                 idx_val = seg.get("index", -1)
                 txt_val = seg.get("text", "")
@@ -243,13 +261,16 @@ class DeepDubTranslator:
                                                text=txt_val,
                                                translated_text="")]
 
+        # If somehow it keeps failing, fallback
         idx_val = seg.get("index", -1)
         txt_val = seg.get("text", "")
         return [IndexedTranslationItem(index=idx_val, text=txt_val, translated_text="")]
 
     def _fallback_fill(self, data: List[dict]) -> List[IndexedTranslationItem]:
-
-        logger.warning("Fallback fill => size=%d => 'Unknown' translations", len(data))
+        """
+        Fallback: return items with empty translated_text if everything else fails.
+        """
+        logger.warning("Fallback fill => size=%d => 'Unknown' or empty translations", len(data))
         items = []
         for seg in data:
             idx_val = seg.get("index", -1)
@@ -326,7 +347,7 @@ class DeepDubTranslator:
             logger.error("Error calling LLM parse: %s", e)
             return None
 
-    def _build_indexed_prompt(self,data: List[dict], target_language: str) -> str:
+    def _build_indexed_prompt(self, data: List[dict], target_language: str) -> str:
         """
         Build the user-level prompt that enumerates each segment's index => text,
         asking the model to produce the final JSON array with 'index', 'text', and 'translated_text'.
@@ -357,8 +378,8 @@ class DeepDubTranslator:
 
     def _validate_indexes(self, original_data: List[dict], llm_items: List[IndexedTranslationItem]) -> bool:
         """
-        Optional check: ensure the LLM's returned indexes match one-to-one 
-        with our original list order. If there's a mismatch, we consider that a parse failure.
+        Ensure the LLM's returned indexes match one-to-one 
+        with our original list order. If there's a mismatch, consider it a parse failure.
         """
         for orig, llm_item in zip(original_data, llm_items):
             if orig["index"] != llm_item.index:
