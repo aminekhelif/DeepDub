@@ -1,0 +1,18 @@
+# config.yaml
+audio_separator_model: "Mel-RoFormer"
+diarization_batch_size: 8
+device: "cpu"
+compute_type: "int8"
+HF_token: ""
+logging_level: "INFO"
+openai_api_key: "lms"
+base_url: "http://127.0.0.1:1234/v1/"
+
+tts:
+  ckpt_file: "/Users/Aminekhelif/Documents/F5-TTS/f5/F5-TTS/ckpts/model_last.pt"
+  vocab_file: "/Users/Aminekhelif/Documents/F5-TTS/f5/F5-TTS/ckpts/vocab.txt"
+  model_cfg_path: "/Users/Aminekhelif/Documents/F5-TTS/f5/F5-TTS/src/f5_tts/configs/F5TTS_Base_train.yaml"
+  vocoder_name: "vocos"
+  load_vocoder_from_local: false
+  device: "mps"
+  nfe_step: 64
