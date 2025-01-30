@@ -1,13 +1,10 @@
-#!/usr/bin/env python3
 import os
 import glob
 import json
 from copy import deepcopy
 from typing import List, Dict, Any
 
-###############################################################################
-# 1) Loading Segments with Audio Paths
-###############################################################################
+
 def load_segments_from_json(
     json_path: str,
     relative_subfolder: str,
@@ -33,7 +30,6 @@ def load_segments_from_json(
         data = json.load(f)
 
     segments = []
-    # Lowercased placeholders
     placeholders = {
         "...", "... ...", "... ... ...", "... ... ... ...",
         "thank you", "sous-titrage", "titrage"
@@ -43,9 +39,7 @@ def load_segments_from_json(
         text_value = seg.get("text", "").strip()
         lower_text = text_value.lower()
 
-        # Optionally skip
         if skip_empty_or_placeholder:
-            # If empty OR if it contains any placeholder as a substring
             if not lower_text or any(ph in lower_text for ph in placeholders):
                 continue
 
@@ -53,18 +47,15 @@ def load_segments_from_json(
         end = seg["end"]
         duration = end - start
 
-        # Speaker
         raw_speaker = seg.get("speaker", "")
         if not raw_speaker:
             raw_speaker = "Unknown"
 
-        # Single-item lists
         speaker_list = [raw_speaker]
         index_list   = [i]
         sub_segments = [{"start": start, "end": end}]
 
-        # Audio path for this segment (relative to the film dir)
-        audio_folder_name = raw_speaker  # e.g., "SPEAKER_00" or "Unknown"
+        audio_folder_name = raw_speaker
         audio_path = (
             f"/{relative_subfolder}/output_directory/diarization/speaker_audio/"
             f"{audio_folder_name}/segment_{i}/audio.wav"
@@ -86,9 +77,6 @@ def load_segments_from_json(
     return segments
 
 
-###############################################################################
-# 2) Merging Short Segments
-###############################################################################
 def merge_small_segments(
     segments: List[Dict[str, Any]],
     min_merge_duration: float = 1.0,
@@ -128,22 +116,18 @@ def merge_small_segments(
             else:
                 same_spk = True
 
-            # Merge condition
             if (short_buffer or short_current) and close_enough and same_spk:
                 new_start = min(buffer_seg["start"], seg["start"])
                 new_end   = max(buffer_seg["end"], seg["end"])
                 new_duration = new_end - new_start
 
-                # Merge text
                 merged_text = (buffer_seg["text"] + " " + seg["text"]).strip()
 
-                # Merge lists
                 merged_speakers  = buffer_seg["speaker"] + seg["speaker"]
                 merged_indexes   = buffer_seg["indexes"] + seg["indexes"]
                 merged_subs      = buffer_seg["sub_segments"] + seg["sub_segments"]
                 merged_audio     = buffer_seg["audio_paths"] + seg["audio_paths"]
 
-                # Update buffer
                 buffer_seg["start"]       = new_start
                 buffer_seg["end"]         = new_end
                 buffer_seg["duration"]    = new_duration
@@ -162,9 +146,6 @@ def merge_small_segments(
     return merged
 
 
-###############################################################################
-# 3) Overlap & Alignment
-###############################################################################
 def compute_time_intersection(e_start, e_end, f_start, f_end) -> float:
     overlap_start = max(e_start, f_start)
     overlap_end   = min(e_end, f_end)
@@ -252,7 +233,6 @@ def align_segments(
                 "overlap_ratio": round(ratio, 3)
             })
 
-            # Advance pointer(s)
             if e_end < f_end:
                 i += 1
             elif f_end < e_end:
@@ -261,7 +241,6 @@ def align_segments(
                 i += 1
                 j += 1
         else:
-            # Not enough overlap => skip whichever ends first
             if e_end < f_end:
                 i += 1
             else:
@@ -270,21 +249,15 @@ def align_segments(
     return matches
 
 
-###############################################################################
-# 4) The High-Level Function
-###############################################################################
 def enhanced_demo_alignment(
     english_json_path: str,
     french_json_path: str,
-    # Merge params
     do_merge: bool = True,
     min_merge_duration: float = 1.0,
     max_gap_before_merge: float = 0.3,
     merge_speakers: bool = False,
-    # Alignment params
     overlap_threshold: float = 0.8,
     overlap_mode: str = "english",
-    # Output
     output_path: str = "aligned_output.json"
 ):
     """
@@ -338,7 +311,6 @@ def enhanced_demo_alignment(
         overlap_mode=overlap_mode
     )
 
-    # Print stats
     n_eng = len(eng_segments)
     n_fr  = len(fr_segments)
     matched_pairs = len(matches)
@@ -351,20 +323,16 @@ def enhanced_demo_alignment(
     print(f"Matched pairs:    {matched_pairs}")
     print(f"Average overlap ratio (mode={overlap_mode}): {avg_overlap:.3f}")
 
-    # Save
     with open(output_path, "w", encoding="utf-8") as f_out:
         json.dump(matches, f_out, indent=2, ensure_ascii=False)
 
     print(f"\nWrote alignment results to {output_path}.\n")
 
 
-###############################################################################
-# 5) The Main Script
-###############################################################################
+
 if __name__ == "__main__":
     import sys
 
-    # Alignment parameters
     min_merge_durations = 0.5
     max_gap_before_merges = 4.0
     merge_speakers_options = True
@@ -373,24 +341,19 @@ if __name__ == "__main__":
 
     base_dir = "Data"
 
-    # An option to do one big merged JSON
     merge_matched_segments = False
     if len(sys.argv) > 1 and sys.argv[1].lower() == "merge_all":
         merge_matched_segments = True
 
-    # 1) Find all FILM* directories
     film_dirs = sorted(glob.glob(os.path.join(base_dir, "FILM*")))
 
     for film_dir in film_dirs:
-        # Attempt VF first
         vf_json = os.path.join(film_dir, "VF", "output_directory", "diarization", "diar_simple.json")
-        # If that doesn't exist, check VFF
         if not os.path.exists(vf_json):
             vf_json_alt = os.path.join(film_dir, "VFF", "output_directory", "diarization", "diar_simple.json")
             if os.path.exists(vf_json_alt):
                 vf_json = vf_json_alt
 
-        # English JSON
         vo_json = os.path.join(film_dir, "VO_anglais", "output_directory", "diarization", "diar_simple.json")
 
         if not os.path.exists(vf_json):
@@ -406,7 +369,6 @@ if __name__ == "__main__":
 
         output_path = os.path.join(film_dir, "matched_segments.json")
 
-        # Call the alignment
         enhanced_demo_alignment(
             english_json_path=vo_json,
             french_json_path=vf_json,
@@ -419,9 +381,7 @@ if __name__ == "__main__":
             output_path=output_path
         )
 
-    ###########################################################################
-    # If user wants to merge all matched_segments into one big JSON:
-    ###########################################################################
+
     if merge_matched_segments:
         all_matches = []
 
@@ -430,7 +390,6 @@ if __name__ == "__main__":
             if not os.path.exists(matched_file):
                 continue
 
-            # The film folder name, e.g. "FILM33"
             film_name = os.path.basename(film_dir)
 
             print(f"[Merging] {matched_file} into global JSON. Prefixing audio paths with /{film_name} ...")
@@ -438,17 +397,13 @@ if __name__ == "__main__":
             with open(matched_file, 'r', encoding='utf-8') as f_in:
                 matches = json.load(f_in)
 
-            # For every match, for both english/french, we update audio_paths
             for match in matches:
-                # English
                 audio_paths = match["english"]["audio_paths"]
-                # e.g. "/VF/output_directory/...". We want "/FILM33/VF/output_directory..."
                 new_audio_paths = []
                 for path in audio_paths:
-                    new_audio_paths.append(f"/{film_name}{path}")  # prefix /FILM33
+                    new_audio_paths.append(f"/{film_name}{path}") 
                 match["english"]["audio_paths"] = new_audio_paths
 
-                # French
                 audio_paths = match["french"]["audio_paths"]
                 new_audio_paths = []
                 for path in audio_paths:
@@ -457,7 +412,6 @@ if __name__ == "__main__":
 
                 all_matches.append(match)
 
-        # Save the big merged JSON in Data/
         merged_output = os.path.join(base_dir, "merged_all_films.json")
         with open(merged_output, 'w', encoding='utf-8') as f_out:
             json.dump(all_matches, f_out, indent=2, ensure_ascii=False)

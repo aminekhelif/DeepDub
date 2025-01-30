@@ -1,0 +1,45 @@
+# Ignore all test folders
+test/
+*/test/
+
+# Ignore all .DS_Store files
+.DS_Store
+*/**/.DS_Store
+
+# Ignore all __pycache__ directories
+__pycache__/
+*/**/__pycache__/
+
+# Ignore all .pyc files
+*.pyc
+*/**/*.pyc
+
+# Ignore  config file
+
+
+# pretrained_models folder
+pretrained_models/
+
+# svoice folder
+svoice/
+
+# audio cache directory
+audio_cache/
+
+# F5_TTS folder
+F5-TTS/
+
+
+fish-speech/ 
+
+Data/
+
+TK/
+
+test2/
+test3/
+out_merged/
+test4/
+merged_alignments/
+tmp/
+_tmp/

@@ -130,10 +130,6 @@ class DeepDubTranslator:
         logger.info("Translation complete. Wrote => %s", output_file)
         return output_file
 
-    ########################################################
-    #  Pre-processing: Assign indexes if needed
-    ########################################################
-
     def _assign_indexes_if_missing(self, segments: List[dict]):
         """
         Make sure each segment has a unique integer 'index'.
@@ -145,9 +141,7 @@ class DeepDubTranslator:
             if "text" not in seg or not isinstance(seg["text"], str):
                 seg["text"] = ""
 
-    ########################################################
-    #  Subdividing approach with fallback
-    ########################################################
+
 
     def _translate_chunk_subdivide(
         self,
@@ -178,7 +172,6 @@ class DeepDubTranslator:
 
             items = parsed_list.items
 
-            # 1) Check length
             if len(items) != size:
                 logger.warning("LLM merged/dropped => got=%d, expected=%d attempt=%d => subdiv",
                                len(items), size, attempt+1)
@@ -186,7 +179,6 @@ class DeepDubTranslator:
                     return self._subdivide_and_combine(data, target_language, model_name)
                 continue
 
-            # 2) Check indexes
             if not self._validate_indexes(data, items):
                 logger.warning("LLM re-ordered or changed indexes. attempt=%d => subdiv",
                                attempt+1)
@@ -194,7 +186,6 @@ class DeepDubTranslator:
                     return self._subdivide_and_combine(data, target_language, model_name)
                 continue
 
-            # 3) Check for empty translated_text
             if any(not (itm.translated_text and itm.translated_text.strip()) for itm in items):
                 logger.warning("LLM returned at least one empty 'translated_text'. attempt=%d => subdiv",
                                attempt+1)
@@ -203,10 +194,8 @@ class DeepDubTranslator:
                 else:
                     continue
 
-            # If all checks passed, return items
             return items
 
-        # If all attempts fail, fallback
         return self._fallback_fill(data)
 
     def _subdivide_and_combine(
@@ -221,7 +210,6 @@ class DeepDubTranslator:
         """
         size = len(data)
         if size <= 1:
-            # Edge case: just translate single
             return self._translate_single(data[0], target_language, model_name)
 
         mid = size // 2
@@ -246,9 +234,7 @@ class DeepDubTranslator:
             res_list = self._call_llm_parse([seg], target_language, model_name)
             if res_list and len(res_list.items) == 1:
                 item = res_list.items[0]
-                # Check index match
                 if self._validate_indexes([seg], [item]):
-                    # Check for non-empty translation
                     if item.translated_text and item.translated_text.strip():
                         return res_list.items
 
@@ -261,7 +247,6 @@ class DeepDubTranslator:
                                                text=txt_val,
                                                translated_text="")]
 
-        # If somehow it keeps failing, fallback
         idx_val = seg.get("index", -1)
         txt_val = seg.get("text", "")
         return [IndexedTranslationItem(index=idx_val, text=txt_val, translated_text="")]
@@ -280,9 +265,6 @@ class DeepDubTranslator:
                                                 translated_text=""))
         return items
 
-    ########################################################
-    # LLM call => (index, text, translated_text)
-    ########################################################
 
     def _call_llm_parse(
         self,
@@ -388,9 +370,7 @@ class DeepDubTranslator:
                 return False
         return True
 
-############################################################
-#  GLOBAL TRANSLATOR INSTANCE
-############################################################
+
 
 translator = DeepDubTranslator(
     client=_client,

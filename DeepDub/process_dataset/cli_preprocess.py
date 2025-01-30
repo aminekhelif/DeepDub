@@ -10,9 +10,7 @@ from collections import defaultdict
 sys.path.append("../")
 from DeepDub.PreProcessing import Preprocessing
 
-###############################################################################
-# 1) Minimal Helpers for Metadata
-###############################################################################
+
 def load_metadata(meta_path: str) -> dict:
     if os.path.isfile(meta_path):
         with open(meta_path, "r") as f:
@@ -22,7 +20,7 @@ def load_metadata(meta_path: str) -> dict:
 
 def load_config(config_path=None):
     if config_path is None:
-        current_file = pathlib.Path(__file__).resolve()  # cli_test.py
+        current_file = pathlib.Path(__file__).resolve()
         repo_root = current_file.parent
         default_config_path = repo_root / "DeepDub" / "config.yaml"
         config_path = str(default_config_path)
@@ -62,9 +60,7 @@ def update_metadata_for_file(
     if diarization_data is not None:
         meta["files"][input_file]["diarization_data"] = diarization_data
 
-###############################################################################
-# 2) The Core Steps: Split, Separate, Diar
-###############################################################################
+
 def run_split(preprocessing: Preprocessing, meta: dict, meta_path: str):
     print("\n=== Step: Split ===")
     extracted_audio, video_no_audio = preprocessing.split_audio_and_video()
@@ -108,9 +104,7 @@ def run_diar(preprocessing: Preprocessing, meta: dict, meta_path: str):
     )
     save_metadata(meta, meta_path)
 
-###############################################################################
-# 3) Additional Helper: Speaker Count
-###############################################################################
+
 def get_speaker_count(diar_json_path: str):
     if not os.path.isfile(diar_json_path):
         return None
@@ -130,9 +124,7 @@ def get_speaker_count(diar_json_path: str):
                 speaker_labels.add(label)
     return len(speaker_labels) if speaker_labels else None
 
-###############################################################################
-# 4) Step Skip Checks (NEW)
-###############################################################################
+
 def split_already_done(meta: dict, input_file: str) -> bool:
     """
     Returns True if 'split_audio' is in the metadata for this file
@@ -160,9 +152,7 @@ def diar_already_done(meta: dict, input_file: str) -> bool:
     diar_path = info.get("diarization_data")
     return bool(diar_path and os.path.isfile(diar_path))
 
-###############################################################################
-# 5) process_single_file logic
-###############################################################################
+
 def process_single_file(
     input_file: str,
     steps: list,
@@ -205,15 +195,12 @@ def process_single_file(
     do_separate = "separate" in steps
     do_diar = "diar" in steps
 
-    # Step: SPLIT
     if do_split:
-        # Check if it was already done
         if split_already_done(meta, input_file):
             print(f"Skipping SPLIT for {input_file}, already done.")
         else:
             run_split(preprocessing, meta, meta_path)
     else:
-        # If skipping, restore from meta if previously done
         prev_audio = meta["files"].get(input_file, {}).get("split_audio")
         if prev_audio and os.path.isfile(prev_audio):
             preprocessing.extracted_audio_path = prev_audio
@@ -221,9 +208,7 @@ def process_single_file(
             print(f"Warning: No existing split audio found for {input_file}. Step 'split' was skipped.")
             return
 
-    # Step: SEPARATE
     if do_separate:
-        # Check if it was already done
         if separate_already_done(meta, input_file):
             print(f"Skipping SEPARATE for {input_file}, already done.")
         else:
@@ -236,7 +221,6 @@ def process_single_file(
             print(f"Warning: No existing vocals file found for {input_file}. Step 'separate' was skipped.")
             return
 
-    # Step: DIAR
     if do_diar:
         if diar_already_done(meta, input_file):
             print(f"Skipping DIAR for {input_file}, already done.")
@@ -248,9 +232,6 @@ def process_single_file(
     for k, v in paths.items():
         print(f"{k}: {v}")
 
-###############################################################################
-# 6) Main
-###############################################################################
 def main():
     parser = argparse.ArgumentParser(description="Process audio/video files in separate steps.")
     parser.add_argument("input_path", type=str,
@@ -354,7 +335,6 @@ def main():
                         full_path = os.path.join(root, f)
                         files_to_process.append(os.path.abspath(full_path))
 
-    # If 'diar' is in steps, do the English->French priority
     if "diar" in steps_to_run:
         dir_map = defaultdict(list)
         for fpath in files_to_process:

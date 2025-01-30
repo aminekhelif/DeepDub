@@ -2,8 +2,6 @@ import os
 from DeepDub.AV_splitter import VideoProcessor
 from DeepDub.AudioSeparator import AudioSeparator
 from DeepDub.Diar import AudioDiarization
-
-# Import logger
 from DeepDub.logger import logger
 
 class Preprocessing:

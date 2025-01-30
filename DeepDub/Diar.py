@@ -24,11 +24,9 @@ class AudioDiarization:
         self.language = language
         self.device_index = device_index
         
-        # Set output directories
         self.diarization_dir = diarization_dir if diarization_dir else os.path.join(self.input_folder, "diarization")
-        self.speaker_audio_dir = os.path.join(self.diarization_dir, "speaker_audio")  # Adjusted to always use diarization_dir
+        self.speaker_audio_dir = os.path.join(self.diarization_dir, "speaker_audio")  
         
-        # Ensure directories exist
         os.makedirs(self.diarization_dir, exist_ok=True)
         os.makedirs(self.speaker_audio_dir, exist_ok=True)
     
@@ -60,11 +58,9 @@ class AudioDiarization:
         logger.info("Assigning speaker labels...")
         result = whisperx.assign_word_speakers(diar_segments, result)
 
-        # Save the full diarization result
         full_json_path = os.path.join(self.diarization_dir, "diar.json")
         self.save_json(result, full_json_path)
 
-        # Save simplified diarization without word-level details
         simplified_segments = [
             {k: v for k, v in seg.items() if k != "words"} for seg in result["segments"]
         ]
@@ -108,7 +104,6 @@ class AudioDiarization:
             segment_dir = os.path.join(speaker_dir, f"segment_{idx}")
             os.makedirs(segment_dir, exist_ok=True)
 
-            # Save audio and metadata
             audio_path = os.path.join(segment_dir, "audio.wav")
             sf.write(audio_path, segment_audio.numpy().T, sample_rate)
             metadata = {**segment, "audio_file": os.path.relpath(audio_path, self.speaker_audio_dir)}
@@ -154,7 +149,6 @@ class AudioDiarization:
                     continue
 
                 data, samplerate = sf.read(audio_file)
-                # Convert to mono
                 if data.ndim == 1:
                     data = data.reshape(-1, 1)
                 elif data.ndim == 2:

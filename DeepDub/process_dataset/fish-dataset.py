@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 import os
 import json
 import soundfile as sf
@@ -7,7 +6,7 @@ from loguru import logger
 from tqdm import tqdm
 
 # ---------------------------------------------------------------
-#  >>> HYDRA / VQGAN code (replicates your vqgan/inference.py) <<<
+#  >>> HYDRA / VQGAN code (replicates  vqgan/inference.py) <<<
 # ---------------------------------------------------------------
 import torch
 import torchaudio
@@ -46,7 +45,6 @@ def load_vqgan_model(config_name: str, checkpoint_path: str, device: str = "cuda
 def vqgan_encode_audio(vqgan_model, input_wav: str, output_tensor: str, device: str = "cuda"):
     audio, sr = torchaudio.load(input_wav)
     if audio.shape[0] > 1:
-        # stereo -> mono
         audio = audio.mean(dim=0, keepdim=True)
     audio = torchaudio.functional.resample(audio, sr, vqgan_model.spec_transform.sample_rate).to(device)
 
@@ -72,8 +70,7 @@ def vqgan_decode_codes(vqgan_model, input_tensor: str, output_wav: str, device: 
     logger.info(f"[VQGAN] Decoded {input_tensor} -> {output_wav} (SR={sr})")
 
 # ---------------------------------------------------------------
-#  >>> TEXT2SEMANTIC code (replicates your text2semantic/inference.py) <<<
-#     WITH a fix for dimension mismatch by truncating prompts
+#  >>> TEXT2SEMANTIC code (replicates  text2semantic/inference.py) <<<
 # ---------------------------------------------------------------
 from fish_speech.models.text2semantic.inference import (
     load_model as load_text2semantic_model,
@@ -83,7 +80,6 @@ from fish_speech.models.text2semantic.inference import (
 
 import torch
 
-# >>> We import the original 'generate' to call after truncation
 from fish_speech.models.text2semantic.inference import generate as real_generate
 
 def patched_generate(
@@ -113,7 +109,6 @@ def patched_generate(
         prompt = prompt[:, :max_len]
         T = max_len
 
-    # >>> Instead of raising NotImplementedError, we call the real generate
     return real_generate(
         model=model,
         prompt=prompt,
@@ -143,7 +138,6 @@ def patched_generate_long(
     chunk_length: int = 150,
     prompt_text=None,
     prompt_tokens=None,
-    # plus whatever other args original code has...
 ):
     """
     A wrapper around your original generate_long that ensures we don't exceed max_seq_len,
@@ -157,7 +151,6 @@ def patched_generate_long(
                        " Forcing max_length = model.config.max_seq_len to avoid mismatch.")
         max_length = model.config.max_seq_len
 
-    # >>> We monkey-patch generate in this scope so calls inside generate_long will use patched_generate
     from fish_speech.models.text2semantic import inference as inf_mod
     inf_mod.generate = patched_generate
 
@@ -179,7 +172,6 @@ def patched_generate_long(
         prompt_tokens=prompt_tokens,
     )
 
-# We override the name used by Text2SemanticWrapper
 generate_long = patched_generate_long
 
 
@@ -266,7 +258,7 @@ class Text2SemanticWrapper:
             temperature=temperature,
             compile=False,
             iterative_prompt=iterative_prompt,
-            max_length=self.model.config.max_seq_len,  # dimension fix
+            max_length=self.model.config.max_seq_len,
             chunk_length=chunk_length,
             prompt_text=prompt_texts,
             prompt_tokens=prompt_tokens,
@@ -294,10 +286,6 @@ class Text2SemanticWrapper:
             return output_files[-1]
         return ""
 
-
-# ---------------------------------------------------------------
-#  >>> TTSService: integrates (1) VQGAN and (2) Text2Semantic <<<
-# ---------------------------------------------------------------
 class TTSService:
     """
     3-step pipeline:
@@ -340,10 +328,8 @@ class TTSService:
         fake_code: str = "fake.pt",
         codes_out: str = "codes_1.pt"
     ) -> float:
-        # Step 1: VQGAN encode
         vqgan_encode_audio(self.vqgan_model, input_wav, fake_code, device=self.device)
 
-        # Step 2: text2semantic
         codes_file = self.text2semantic.generate_codes(
             text=french_text,
             prompt_text=english_prompt_text,
@@ -357,16 +343,13 @@ class TTSService:
         if codes_file != codes_out:
             os.replace(codes_file, codes_out)
 
-        # Step 3: VQGAN decode
         vqgan_decode_codes(self.vqgan_model, codes_out, out_wav, device=self.device)
         duration = sf.info(out_wav).duration
         logger.info(f"[TTSService] Created {out_wav} with duration={duration:.2f}s")
         return duration
 
 
-# ---------------------------------------------------------------
-#  >>> MAIN SCRIPT
-# ---------------------------------------------------------------
+
 if __name__ == "__main__":
     json_path = "/home/amine/DeepDub/Data/merged_all_films.json"
     output_json_path = "/home/amine/DeepDub/Data/merged_all_films_with_tts.json"

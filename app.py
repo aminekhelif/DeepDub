@@ -8,15 +8,12 @@ import soundfile as sf
 from DeepDub.logger import logger
 import shutil
 import tempfile
-
-# Additional imports
 from pydub import AudioSegment
 from moviepy.editor import VideoFileClip, AudioFileClip
 
 from DeepDub.tm import translator
 from DeepDub.TTSService import synthesize_translated_json
 
-# Load configuration
 with open('./DeepDub/config.yaml', 'r') as file:
     config = yaml.safe_load(file)
 
@@ -26,15 +23,14 @@ os.makedirs(temp_output_dir, exist_ok=True)
 os.environ["GRADIO_TEMP_DIR"] = temp_output_dir
 tempfile.tempdir = temp_output_dir
 
-# Shared preprocessor instance
 class VideoProcessorManager:
     def __init__(self):
         self.preprocessor = None
         self.step_results = {}
         self.speaker_audio_structure = {}
         self.diar_simple_path = None
-        self.translated_file_path = None  # path to diarization_translated.json
-        self.final_tts_json = None        # path to diarization_translated_tts.json
+        self.translated_file_path = None  
+        self.final_tts_json = None       
 
     def initialize(self, input_video=None):
         output_dir = os.path.join(temp_output_dir, "separation_output")
@@ -61,10 +57,8 @@ def update_step_results(step, **results):
     for key, value in results.items():
         logger.info(f"{step} result - {key}: {value}")
 
-# Step 1: Split Audio and Video
 def split_audio_video(input_video):
     try:
-        # Initialize or re-initialize manager if needed
         if not manager.preprocessor or (manager.preprocessor.input_video and manager.preprocessor.input_video != os.path.abspath(input_video)):
             manager.initialize(input_video)
 
@@ -75,27 +69,22 @@ def split_audio_video(input_video):
         logger.error(f"Error splitting audio and video: {e}")
         return f"Error: {e}", None
 
-# Step 2: Separate Audio
 def separate_audio(input_audio):
     try:
         if not manager.preprocessor:
             manager.initialize()
 
-        # If Gradio passes (sample_rate, data), save temporarily
         if isinstance(input_audio, tuple):
             sampling_rate, audio_data = input_audio
             with tempfile.NamedTemporaryFile(suffix=".wav", delete=False, dir=temp_output_dir) as temp_audio_file:
                 sf.write(temp_audio_file.name, audio_data, sampling_rate)
                 input_audio = temp_audio_file.name
 
-        # Update the preprocessor's extracted audio path
         manager.preprocessor.extracted_audio_path = input_audio
 
-        # Separate vocals & background
         vocals_path, background_path = manager.preprocessor.separate_audio()
         separator = manager.preprocessor.audio_separator
 
-        # Generate and save spectrograms
         vocals_spectrogram_path = os.path.join(manager.preprocessor.base_output_dir, "vocals_spectrogram.png")
         background_spectrogram_path = os.path.join(manager.preprocessor.base_output_dir, "background_spectrogram.png")
         separator.save_spectrogram(vocals_path, vocals_spectrogram_path)
@@ -112,13 +101,11 @@ def separate_audio(input_audio):
         logger.error(f"Error separating audio: {e}")
         return f"Error: {e}", None, None, None
 
-# Step 3: Perform Diarization
 def perform_diarization(input_audio):
     try:
         if not manager.preprocessor:
             manager.initialize()
 
-        # Remove old diarization folder (if it exists)
         diarization_dir = os.path.join(manager.preprocessor.base_output_dir, "diarization")
         if os.path.exists(diarization_dir):
             shutil.rmtree(diarization_dir)
@@ -257,7 +244,6 @@ def save_diarization_data(json_text):
     except Exception as e:
         return f"Error saving JSON: {str(e)}"
 
-# Step 4: Translate Diarization JSON
 def translate_diar_json():
     """
     Called when user clicks 'Translate Diarization'.
@@ -270,7 +256,6 @@ def translate_diar_json():
         if not diar_simple_path or not os.path.exists(diar_simple_path):
             return "Error: diar_simple.json path not found. Please run diarization first."
 
-        # Load the current JSON from disk
         with open(diar_simple_path, "r", encoding="utf-8") as f:
             segments_data = json.load(f)
         if not isinstance(segments_data, list):
@@ -282,17 +267,14 @@ def translate_diar_json():
             target_language="French"
         )
 
-        # Store this path for the TTS step
         manager.translated_file_path = translated_file_path
 
         if not os.path.exists(translated_file_path):
             return f"Error: Translated file not found at {translated_file_path}"
 
-        # Load translated content
         with open(translated_file_path, "r", encoding="utf-8") as tf:
             translated_content = json.load(tf)
 
-        # Example: attach "duration" and "audio_path" for each segment
         diarization_dir = os.path.dirname(translated_file_path)
         speaker_audio_dir = os.path.join(diarization_dir, "speaker_audio")
 
@@ -303,7 +285,6 @@ def translate_diar_json():
             seg["duration"] = diff
             speaker_name = seg.get("speaker", "Unknown")
 
-            # This path is for reference only; TTS paths will be updated in Step 5
             seg["audio_path"] = os.path.join(
                 speaker_audio_dir,
                 speaker_name,
@@ -311,7 +292,6 @@ def translate_diar_json():
                 "audio.wav"
             )
 
-        # Save back the appended data
         with open(translated_file_path, "w", encoding="utf-8") as tf:
             json.dump(translated_content, tf, indent=4, ensure_ascii=False)
 
@@ -321,9 +301,7 @@ def translate_diar_json():
         logger.error(f"Error translating diarization JSON: {exc}")
         return f"Error translating diarization JSON: {str(exc)}"
 
-# -------------------------------------------
-# Step 5: TTS Synthesis (UPDATED per sandbox)
-# -------------------------------------------
+
 def run_tts():
     """
     1) Retrieves manager.translated_file_path, which should be .../diarization_translated.json
@@ -336,35 +314,26 @@ def run_tts():
     if not translated_file or not os.path.exists(translated_file):
         return "Error: No valid 'diarization_translated.json' found. Please run translation first."
 
-    # Just like your sandbox, pass an absolute path for TTS output:
-    # e.g. /home/amine/DeepDub/tmp/deepdub_outputs/separation_output/tts_output
+ 
     tts_out_dir = os.path.join(
         manager.preprocessor.base_output_dir, 
         "tts_output"
     )
     os.makedirs(tts_out_dir, exist_ok=True)
 
-    # Synthesize TTS
     result_str = synthesize_translated_json(
         translated_json_path=translated_file,
         temp_output_dir=tts_out_dir
     )
 
-    # The TTS function writes an updated JSON: e.g. diarization_translated_tts.json
-    # Let's store that path in manager.final_tts_json
     final_tts_json = os.path.splitext(translated_file)[0] + "_tts.json"
     if os.path.exists(final_tts_json):
         manager.final_tts_json = final_tts_json
     else:
-        # Fallback if we can't find the file
         manager.final_tts_json = None
 
     return result_str
 
-# ------------------------------------------------------
-# STEP 6: Merge TTS + Background and Finalize Video
-# (UPDATED to reflect sandbox logic with manager paths)
-# ------------------------------------------------------
 def merge_tts_and_finalize():
     """
     1) Load the final TTS JSON from manager.final_tts_json.
@@ -483,7 +452,6 @@ with gr.Blocks() as demo:
         outputs=[video_without_audio, extracted_audio]
     )
 
-    # Step 2
     gr.Markdown("### Step 2: Separate Audio")
     separate_button = gr.Button("Separate Audio")
     with gr.Row():
@@ -499,7 +467,6 @@ with gr.Blocks() as demo:
         outputs=[vocals_audio, background_audio, vocals_spectrogram, background_spectrogram]
     )
 
-    # Step 3
     gr.Markdown("### Step 3: Perform Diarization")
     diarize_button = gr.Button("Perform Diarization")
 
@@ -529,7 +496,6 @@ with gr.Blocks() as demo:
         outputs=[metadata_display, file_audio]
     )
 
-    # Save diar edits
     save_diar_button = gr.Button("Save Diarization Edits")
     save_status = gr.Textbox(label="Save Status", interactive=False)
 
@@ -539,7 +505,6 @@ with gr.Blocks() as demo:
         outputs=[save_status]
     )
 
-    # Step 4
     gr.Markdown("### Step 4: Translate Diarization JSON")
     translate_button = gr.Button("Translate Diarization")
     translated_json_display = gr.Textbox(label="Translated JSON", lines=15, interactive=False)
@@ -550,7 +515,6 @@ with gr.Blocks() as demo:
         outputs=[translated_json_display]
     )
 
-    # Step 5
     gr.Markdown("### Step 5: TTS Synthesis")
     tts_button = gr.Button("Synthesize TTS")
     tts_result_display = gr.Textbox(label="Synthesized JSON", lines=15, interactive=False)
@@ -561,7 +525,6 @@ with gr.Blocks() as demo:
         outputs=[tts_result_display]
     )
 
-    # Step 6
     gr.Markdown("### Step 6: Merge TTS + Background and Finalize Video")
     merge_button = gr.Button("Merge & Finalize")
     final_video_out = gr.Video(label="Final Video (with Audio)", height=300)

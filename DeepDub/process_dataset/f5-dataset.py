@@ -9,12 +9,10 @@ from pathlib import Path
 from loguru import logger
 from tqdm import tqdm
 
-# -------------------------------------------------------------------
-#   Imports from your F5-TTS codebase (unchanged)
-# -------------------------------------------------------------------
+
 from f5_tts.infer.utils_infer import (
     infer_process,
-    load_model,                # We'll pass the checkpoint path as the 3rd positional arg
+    load_model,               
     preprocess_ref_audio_text,
     mel_spec_type as default_mel_spec_type,
     target_rms as default_target_rms,
@@ -71,9 +69,7 @@ def load_vocoder_cli_style(
         raise ValueError(f"Unknown vocoder_name={vocoder_name}")
 
 
-# -------------------------------------------------------------------
-#   F5TTSService: loads F5-TTS model + vocoder once, does inference
-# -------------------------------------------------------------------
+
 class F5TTSService:
     """
     Loads the F5-TTS model + vocoder once, replicating your CLI logic,
@@ -108,13 +104,11 @@ class F5TTSService:
         self.sway_sampling_coef = sway_sampling_coef
         self.speed = speed
 
-        # 1) Load vocoder from CLI fallback
         self.vocoder = load_vocoder_cli_style(
             vocoder_name=self.vocoder_name,
             load_vocoder_from_local=self.load_vocoder_from_local,
         )
 
-        # 2) Load F5-TTS model
         print("Using F5-TTS...")
         print(f"vocab :  {self.vocab_file}")
         print(f"token :  custom")
@@ -122,11 +116,10 @@ class F5TTSService:
 
         self.model_cfg = OmegaConf.load(self.model_cfg_path).model.arch
 
-        # pass ckpt_file as the 3rd positional argument => ckpt_path
         self.ema_model = load_model(
             DiT,
             self.model_cfg,
-            self.ckpt_file,        # correct positional param for ckpt_path
+            self.ckpt_file,        
             mel_spec_type=self.vocoder_name,
             vocab_file=self.vocab_file,
             device=self.device,
@@ -181,7 +174,6 @@ class F5TTSService:
 
         os.makedirs(os.path.dirname(output_wav), exist_ok=True)
 
-        # >>> ADD format="WAV" so PySoundFile recognizes .wav.tmp extension
         sf.write(output_wav, audio_segment, final_sr, format="WAV")
         duration = len(audio_segment) / final_sr
         print(f"{output_wav}")
@@ -193,16 +185,11 @@ class F5TTSService:
         return duration
 
 
-# -------------------------------------------------------------------
-#  create_silence: wave of zeros for "duration_sec"
-# -------------------------------------------------------------------
+
 def create_silence(duration_sec: float, sr: int) -> torch.Tensor:
     length = int(round(duration_sec * sr))
     return torch.zeros((1, length), dtype=torch.float32)
 
-# -------------------------------------------------------------------
-#  merge_subsegments_dyn: merges ANY number of sub-segments
-# -------------------------------------------------------------------
 def merge_subsegments_dyn(
     sub_paths: list[str],
     total_duration: float,
@@ -248,7 +235,6 @@ def merge_subsegments_dyn(
     chunk = gap / (N + 1) if N > 0 else gap
     sil_chunk = create_silence(chunk, sample_rate)
 
-    # Build final wave => [sil, sub1, sil, sub2, ..., subN, sil]
     final_list = [sil_chunk]
     for wav in waves:
         final_list.append(wav)
@@ -261,18 +247,14 @@ def merge_subsegments_dyn(
     return merged_path, sample_rate
 
 
-# -------------------------------------------------------------------
-#  MAIN SCRIPT
-# -------------------------------------------------------------------
+
 if __name__ == "__main__":
 
-    # 1) Input/Output
     json_path = "/home/amine/DeepDub/Data/merged_all_films_with_f5.json"
     output_json_path = "/home/amine/DeepDub/Data/merged_all_films_with_f5-64.json"
     f5_folder = "/home/amine/DeepDub/Data/f5-64"
     os.makedirs(f5_folder, exist_ok=True)
 
-    # 2) Initialize once
     service = F5TTSService(
         ckpt_file="/home/amine/DeepDub/F5-TTS/ckpts/model_last.pt",
         vocab_file="/home/amine/DeepDub/F5-TTS/ckpts/vocab.txt",
@@ -283,7 +265,6 @@ if __name__ == "__main__":
         nfe_step=32,
     )
 
-    # 3) Load JSON
     with open(json_path, "r", encoding="utf-8") as f:
         data = json.load(f)
     base_dir = os.path.dirname(json_path)
@@ -291,7 +272,6 @@ if __name__ == "__main__":
     total_rows = len(data)
     logger.info(f"Found {total_rows} total segments in JSON.")
 
-    # 4) Determine missing rows => i => i.wav
     missing_rows = []
     for i in range(total_rows):
         final_wav = os.path.join(f5_folder, f"{i}.wav")
@@ -300,20 +280,18 @@ if __name__ == "__main__":
 
     logger.info(f"{len(missing_rows)} missing .wav from {total_rows} total.")
 
-    # 5) Process missing
     for i in tqdm(missing_rows, desc="Processing missing rows"):
         seg = data[i]
         english_info = seg["english"]
         fr_text = seg["french"]["text"]
 
         final_wav = os.path.join(f5_folder, f"{i}.wav")
-        tmp_wav   = final_wav + ".tmp"  # partial safety
+        tmp_wav   = final_wav + ".tmp" 
 
         eng_duration = english_info["duration"]
         eng_text     = english_info["text"]
         audio_paths  = english_info["audio_paths"]
 
-        # Merge sub-segments if multiple
         merged_ref, sr_ = merge_subsegments_dyn(audio_paths, eng_duration, base_dir)
 
         logger.info(f"[F5] Row={i}, fix_duration={eng_duration:.2f}s => {tmp_wav}")
@@ -321,26 +299,23 @@ if __name__ == "__main__":
             merged_ref_audio_path=merged_ref,
             ref_text=eng_text,
             gen_text=fr_text,
-            output_wav=tmp_wav,  # we pass .tmp
+            output_wav=tmp_wav, 
             fix_duration=eng_duration,
             remove_silence=False
         )
 
-        # If .tmp was successfully created, rename => final
         if os.path.exists(tmp_wav):
             os.rename(tmp_wav, final_wav)
         else:
             logger.warning(f"No .tmp file for row {i}, skipping rename.")
             continue
 
-        # Update JSON
         seg.setdefault("tts", {})
         seg["tts"]["f5-tts-64"] = {
             "audio_path": f"/f5-64/{i}.wav",
             "duration": dur
         }
 
-    # 6) Save updated JSON
     with open(output_json_path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
 

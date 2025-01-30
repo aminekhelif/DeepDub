@@ -4,14 +4,11 @@ import yaml
 import soundfile as sf
 from omegaconf import OmegaConf
 from loguru import logger
-
-# --------------------- NEW: OpenVoice Imports ---------------------
 import torch
 from openvoice import se_extractor
 from openvoice.api import ToneColorConverter
 
-# Load OpenVoice ToneColorConverter once
-ckpt_converter = "/home/amine/OpenVoice/checkpoints_v2/converter"  # <-- Change to your path
+ckpt_converter = "/home/amine/OpenVoice/checkpoints_v2/converter" 
 device = "cuda:0" if torch.cuda.is_available() else "cpu"
 
 logger.info("Loading ToneColorConverter (OpenVoice)...")
@@ -135,7 +132,6 @@ def synthesize_translated_json(translated_json_path: str, temp_output_dir: str) 
         logger.error(msg)
         return msg
 
-    # ------------------ CHANGE #1: Use temp_output_dir as-is ------------------
     tts_dir = temp_output_dir
     os.makedirs(tts_dir, exist_ok=True)
 
@@ -150,7 +146,6 @@ def synthesize_translated_json(translated_json_path: str, temp_output_dir: str) 
             logger.warning(f"[TTS] Segment {i} missing fields, skipping.")
             continue
 
-        # Keep your original line for adding dots:
         new_text = seg.get("translated_text") + " ..."
 
         out_wav = os.path.join(tts_dir, f"{i}.wav")
@@ -168,11 +163,7 @@ def synthesize_translated_json(translated_json_path: str, temp_output_dir: str) 
             # ----------- (2) Run OpenVoice Timbre Transfer -----------
             speaker_id = seg.get("speaker")
             if speaker_id:
-                # ------------------ CHANGE #2: Go up one directory -------------
-                # e.g. if ref_audio is:
-                #   /home/amine/.../SPEAKER_08/segment_1/audio.wav
-                # then the concatenated file is in:
-                #   /home/amine/.../SPEAKER_08/SPEAKER_08_concatenated.wav
+
                 speaker_dir = os.path.dirname(os.path.dirname(ref_audio))
                 concatenated_ref = os.path.join(speaker_dir, f"{speaker_id}_concatenated.wav")
 
